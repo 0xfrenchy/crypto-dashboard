@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Derivatives Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-card: #16161f;
+      --bg-card-hover: #1a1a25;
+      --border: #2a2a3a;
+      --text-primary: #ffffff;
+      --text-secondary: #8a8a9a;
+      --text-muted: #5a5a6a;
+      --accent-green: #00ff88;
+      --accent-green-dim: rgba(0, 255, 136, 0.15);
+      --accent-red: #ff4466;
+      --accent-red-dim: rgba(255, 68, 102, 0.15);
+      --accent-blue: #4488ff;
+      --accent-blue-dim: rgba(68, 136, 255, 0.15);
+      --accent-yellow: #ffcc00;
+      --accent-purple: #aa66ff;
+      --gradient-green: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
+      --gradient-red: linear-gradient(135deg, #ff4466 0%, #cc3355 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        linear-gradient(rgba(42, 42, 58, 0.3) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(42, 42, 58, 0.3) 1px, transparent 1px);
+      background-size: 50px 50px;
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: var(--gradient-green);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--bg-primary);
+    }
+
+    .logo h1 {
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    .logo h1 span {
+      color: var(--accent-green);
+    }
+
+    .header-info {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.error {
+      background: var(--accent-red);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .last-update {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Main grid */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+
+    @media (max-width: 1024px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Coin section */
+    .coin-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .coin-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+
+    .coin-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .coin-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .coin-icon.btc {
+      background: linear-gradient(135deg, #f7931a 0%, #d97a00 100%);
+      color: white;
+    }
+
+    .coin-icon.eth {
+      background: linear-gradient(135deg, #627eea 0%, #4a5fc1 100%);
+      color: white;
+    }
+
+    .coin-name h2 {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .coin-name span {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .coin-content {
+      padding: 24px;
+    }
+
+    /* Metric cards */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    @media (max-width: 768px) {
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .metric-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .metric-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--text-muted);
+    }
+
+    .metric-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .metric-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .info-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--text-muted);
+      cursor: help;
+      position: relative;
+    }
+
+    .info-icon:hover {
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+    }
+
+    /* Tooltip */
+    .tooltip {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      width: 280px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s ease;
+      z-index: 100;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: var(--border);
+    }
+
+    .tooltip h4 {
+      color: var(--text-primary);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .info-icon:hover .tooltip {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .metric-value.positive {
+      color: var(--accent-green);
+    }
+
+    .metric-value.negative {
+      color: var(--accent-red);
+    }
+
+    .metric-value.neutral {
+      color: var(--text-primary);
+    }
+
+    .metric-subtext {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Chart container */
+    .chart-container {
+      height: 80px;
+      margin-top: 12px;
+    }
+
+    /* Exchange breakdown */
+    .exchange-breakdown {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .exchange-breakdown h4 {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .exchange-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .exchange-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-primary);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .exchange-item .name {
+      color: var(--text-secondary);
+    }
+
+    .exchange-item .value {
+      color: var(--text-primary);
+    }
+
+    /* Long/Short bar */
+    .ls-bar-container {
+      margin-top: 12px;
+    }
+
+    .ls-bar {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--accent-red);
+      overflow: hidden;
+      display: flex;
+    }
+
+    .ls-bar-long {
+      height: 100%;
+      background: var(--accent-green);
+      transition: width 0.5s ease;
+    }
+
+    .ls-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .ls-labels .long {
+      color: var(--accent-green);
+    }
+
+    .ls-labels .short {
+      color: var(--accent-red);
+    }
+
+    /* Loading state */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 0;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent-green);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Error state */
+    .error-message {
+      text-align: center;
+      padding: 40px;
+      color: var(--accent-red);
+    }
+
+    .error-message h3 {
+      margin-bottom: 8px;
+    }
+
+    .error-message p {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 32px 0;
+      margin-top: 32px;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    footer a {
+      color: var(--accent-blue);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* Fade in animation */
+    .fade-in {
+      animation: fadeIn 0.4s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <div class="logo-icon">⚡</div>
+        <h1>Crypto <span>Derivatives</span></h1>
+      </div>
+      <div class="header-info">
+        <div class="status">
+          <div class="status-dot" id="status-dot"></div>
+          <span id="status-text">Connecting...</span>
+        </div>
+        <div class="last-update" id="last-update">--</div>
+      </div>
+    </header>
+
+    <main class="dashboard-grid" id="dashboard">
+      <!-- BTC Section -->
+      <section class="coin-section fade-in" id="btc-section">
+        <div class="coin-header">
+          <div class="coin-title">
+            <div class="coin-icon btc">₿</div>
+            <div class="coin-name">
+              <h2>Bitcoin</h2>
+              <span>BTC/USDT Perpetual</span>
+            </div>
+          </div>
+        </div>
+        <div class="coin-content">
+          <div class="metrics-grid">
+            <!-- Open Interest -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">
+                  Open Interest
+                  <span class="info-icon">
+                    ?
+                    <div class="tooltip">
+                      <h4>Open Interest (OI)</h4>
+                      The total value of all outstanding futures contracts that haven't been settled. 
+                      <br><br>
+                      <strong>↑ Rising OI:</strong> New money entering the market, trend likely to continue.
+                      <br>
+                      <strong>↓ Falling OI:</strong> Positions closing, potential trend reversal.
+                    </div>
+                  </span>
+                </span>
+              </div>
+              <div class="metric-value neutral" id="btc-oi">--</div>
+              <div class="metric-subtext" id="btc-oi-change">24h change: --</div>
+              <div class="chart-container">
+                <canvas id="btc-oi-chart"></canvas>
+              </div>
+              <div class="exchange-breakdown">
+                <h4>By Exchange</h4>
+                <div class="exchange-list" id="btc-oi-exchanges">--</div>
+              </div>
+            </div>
+
+            <!-- Funding Rate -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">
+                  Funding Rate
+                  <span class="info-icon">
+                    ?
+                    <div class="tooltip">
+                      <h4>Funding Rate</h4>
+                      A fee exchanged between long and short traders every 8 hours to keep futures prices aligned with spot.
+                      <br><br>
+                      <strong>Positive (green):</strong> Longs pay shorts. Market is bullish, but high rates may signal overleveraged longs.
+                      <br>
+                      <strong>Negative (red):</strong> Shorts pay longs. Market is bearish or expecting a dip.
+                    </div>
+                  </span>
+                </span>
+              </div>
+              <div class="metric-value" id="btc-fr">--</div>
+              <div class="metric-subtext">Average across exchanges</div>
+              <div class="chart-container">
+                <canvas id="btc-fr-chart"></canvas>
+              </div>
+              <div class="exchange-breakdown">
+                <h4>By Exchange</h4>
+                <div class="exchange-list" id="btc-fr-exchanges">--</div>
+              </div>
+            </div>
+
+            <!-- Long/Short Ratio -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">
+                  Long/Short Ratio
+                  <span class="info-icon">
+                    ?
+                    <div class="tooltip">
+                      <h4>Long/Short Ratio</h4>
+                      The ratio of traders holding long vs short positions.
+                      <br><br>
+                      <strong>Ratio > 1:</strong> More longs than shorts. Bullish sentiment, but could mean crowded trade.
+                      <br>
+                      <strong>Ratio < 1:</strong> More shorts than longs. Bearish sentiment or potential short squeeze setup.
+                      <br><br>
+                      <em>Extreme readings often precede reversals.</em>
+                    </div>
+                  </span>
+                </span>
+              </div>
+              <div class="metric-value" id="btc-ls">--</div>
+              <div class="ls-bar-container">
+                <div class="ls-bar">
+                  <div class="ls-bar-long" id="btc-ls-bar" style="width: 50%"></div>
+                </div>
+                <div class="ls-labels">
+                  <span class="long" id="btc-long-pct">Long: --%</span>
+                  <span class="short" id="btc-short-pct">Short: --%</span>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="btc-ls-chart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ETH Section -->
+      <section class="coin-section fade-in" id="eth-section" style="animation-delay: 0.1s">
+        <div class="coin-header">
+          <div class="coin-title">
+            <div class="coin-icon eth">Ξ</div>
+            <div class="coin-name">
+              <h2>Ethereum</h2>
+              <span>ETH/USDT Perpetual</span>
+            </div>
+          </div>
+        </div>
+        <div class="coin-content">
+          <div class="metrics-grid">
+            <!-- Open Interest -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">
+                  Open Interest
+                  <span class="info-icon">
+                    ?
+                    <div class="tooltip">
+                      <h4>Open Interest (OI)</h4>
+                      The total value of all outstanding futures contracts that haven't been settled. 
+                      <br><br>
+                      <strong>↑ Rising OI:</strong> New money entering the market, trend likely to continue.
+                      <br>
+                      <strong>↓ Falling OI:</strong> Positions closing, potential trend reversal.
+                    </div>
+                  </span>
+                </span>
+              </div>
+              <div class="metric-value neutral" id="eth-oi">--</div>
+              <div class="metric-subtext" id="eth-oi-change">24h change: --</div>
+              <div class="chart-container">
+                <canvas id="eth-oi-chart"></canvas>
+              </div>
+              <div class="exchange-breakdown">
+                <h4>By Exchange</h4>
+                <div class="exchange-list" id="eth-oi-exchanges">--</div>
+              </div>
+            </div>
+
+            <!-- Funding Rate -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">
+                  Funding Rate
+                  <span class="info-icon">
+                    ?
+                    <div class="tooltip">
+                      <h4>Funding Rate</h4>
+                      A fee exchanged between long and short traders every 8 hours to keep futures prices aligned with spot.
+                      <br><br>
+                      <strong>Positive (green):</strong> Longs pay shorts. Market is bullish, but high rates may signal overleveraged longs.
+                      <br>
+                      <strong>Negative (red):</strong> Shorts pay longs. Market is bearish or expecting a dip.
+                    </div>
+                  </span>
+                </span>
+              </div>
+              <div class="metric-value" id="eth-fr">--</div>
+              <div class="metric-subtext">Average across exchanges</div>
+              <div class="chart-container">
+                <canvas id="eth-fr-chart"></canvas>
+              </div>
+              <div class="exchange-breakdown">
+                <h4>By Exchange</h4>
+                <div class="exchange-list" id="eth-fr-exchanges">--</div>
+              </div>
+            </div>
+
+            <!-- Long/Short Ratio -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">
+                  Long/Short Ratio
+                  <span class="info-icon">
+                    ?
+                    <div class="tooltip">
+                      <h4>Long/Short Ratio</h4>
+                      The ratio of traders holding long vs short positions.
+                      <br><br>
+                      <strong>Ratio > 1:</strong> More longs than shorts. Bullish sentiment, but could mean crowded trade.
+                      <br>
+                      <strong>Ratio < 1:</strong> More shorts than longs. Bearish sentiment or potential short squeeze setup.
+                      <br><br>
+                      <em>Extreme readings often precede reversals.</em>
+                    </div>
+                  </span>
+                </span>
+              </div>
+              <div class="metric-value" id="eth-ls">--</div>
+              <div class="ls-bar-container">
+                <div class="ls-bar">
+                  <div class="ls-bar-long" id="eth-ls-bar" style="width: 50%"></div>
+                </div>
+                <div class="ls-labels">
+                  <span class="long" id="eth-long-pct">Long: --%</span>
+                  <span class="short" id="eth-short-pct">Short: --%</span>
+                </div>
+              </div>
+              <div class="chart-container">
+                <canvas id="eth-ls-chart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      Data provided by <a href="https://coinalyze.net" target="_blank">Coinalyze</a> • 
+      Auto-refreshes every 60 seconds
+    </footer>
+  </div>
+
+  <script>
+    // Chart instances
+    const charts = {};
+    
+    // API base URL (will be same origin in production)
+    const API_BASE = window.location.origin;
+    
+    // Format large numbers
+    function formatNumber(num) {
+      if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+      if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+      if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
+      return num.toFixed(2);
+    }
+    
+    // Format percentage
+    function formatPercent(num) {
+      const pct = num * 100;
+      const sign = pct >= 0 ? '+' : '';
+      return sign + pct.toFixed(4) + '%';
+    }
+    
+    // Format time
+    function formatTime(timestamp) {
+      return new Date(timestamp).toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+      });
+    }
+    
+    // Create mini chart
+    function createChart(canvasId, data, color, isPercentage = false) {
+      const ctx = document.getElementById(canvasId);
+      if (!ctx) return;
+      
+      // Destroy existing chart
+      if (charts[canvasId]) {
+        charts[canvasId].destroy();
+      }
+      
+      const values = data.map(d => isPercentage ? d.value * 100 : d.value);
+      const labels = data.map(d => formatTime(d.t * 1000));
+      
+      charts[canvasId] = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: values,
+            borderColor: color,
+            backgroundColor: color + '20',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: color,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              enabled: true,
+              mode: 'index',
+              intersect: false,
+              backgroundColor: '#16161f',
+              borderColor: '#2a2a3a',
+              borderWidth: 1,
+              titleColor: '#8a8a9a',
+              bodyColor: '#ffffff',
+              titleFont: { family: 'JetBrains Mono', size: 10 },
+              bodyFont: { family: 'JetBrains Mono', size: 12 },
+              padding: 8,
+              displayColors: false,
+              callbacks: {
+                label: function(context) {
+                  if (isPercentage) {
+                    return context.parsed.y.toFixed(4) + '%';
+                  }
+                  return formatNumber(context.parsed.y);
+                }
+              }
+            }
+          },
+          scales: {
+            x: { display: false },
+            y: { display: false }
+          },
+          interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+          }
+        }
+      });
+    }
+    
+    // Update status
+    function updateStatus(connected, message) {
+      const dot = document.getElementById('status-dot');
+      const text = document.getElementById('status-text');
+      
+      if (connected) {
+        dot.classList.remove('error');
+        text.textContent = message || 'Live';
+      } else {
+        dot.classList.add('error');
+        text.textContent = message || 'Disconnected';
+      }
+    }
+    
+    // Update exchange breakdown
+    function updateExchanges(elementId, exchanges) {
+      const el = document.getElementById(elementId);
+      if (!el || !exchanges) return;
+      
+      el.innerHTML = exchanges
+        .filter(e => e.value)
+        .map(e => `
+          <div class="exchange-item">
+            <span class="name">${e.exchange}:</span>
+            <span class="value">$${formatNumber(e.value)}</span>
+          </div>
+        `).join('');
+    }
+    
+    // Update funding rate exchanges
+    function updateFRExchanges(elementId, exchanges) {
+      const el = document.getElementById(elementId);
+      if (!el || !exchanges) return;
+      
+      el.innerHTML = exchanges
+        .filter(e => e.value !== null && e.value !== undefined)
+        .map(e => {
+          const pct = e.value * 100;
+          const color = pct >= 0 ? '#00ff88' : '#ff4466';
+          return `
+            <div class="exchange-item">
+              <span class="name">${e.exchange}:</span>
+              <span class="value" style="color: ${color}">${pct >= 0 ? '+' : ''}${pct.toFixed(4)}%</span>
+            </div>
+          `;
+        }).join('');
+    }
+    
+    // Fetch all data
+    async function fetchData() {
+      try {
+        updateStatus(true, 'Updating...');
+        
+        // Fetch all data in parallel
+        const [
+          btcOI, ethOI,
+          btcFR, ethFR,
+          btcOIHistory, ethOIHistory,
+          btcFRHistory, ethFRHistory,
+          btcLSHistory, ethLSHistory
+        ] = await Promise.all([
+          fetch(`${API_BASE}/api/open-interest/btc`).then(r => r.json()),
+          fetch(`${API_BASE}/api/open-interest/eth`).then(r => r.json()),
+          fetch(`${API_BASE}/api/funding-rate/btc`).then(r => r.json()),
+          fetch(`${API_BASE}/api/funding-rate/eth`).then(r => r.json()),
+          fetch(`${API_BASE}/api/open-interest-history/btc`).then(r => r.json()),
+          fetch(`${API_BASE}/api/open-interest-history/eth`).then(r => r.json()),
+          fetch(`${API_BASE}/api/funding-rate-history/btc`).then(r => r.json()),
+          fetch(`${API_BASE}/api/funding-rate-history/eth`).then(r => r.json()),
+          fetch(`${API_BASE}/api/long-short-history/btc`).then(r => r.json()),
+          fetch(`${API_BASE}/api/long-short-history/eth`).then(r => r.json())
+        ]);
+        
+        // Update BTC
+        document.getElementById('btc-oi').textContent = '$' + formatNumber(btcOI.total);
+        updateExchanges('btc-oi-exchanges', btcOI.byExchange);
+        
+        const btcFRVal = btcFR.average * 100;
+        document.getElementById('btc-fr').textContent = (btcFRVal >= 0 ? '+' : '') + btcFRVal.toFixed(4) + '%';
+        document.getElementById('btc-fr').className = 'metric-value ' + (btcFRVal >= 0 ? 'positive' : 'negative');
+        updateFRExchanges('btc-fr-exchanges', btcFR.byExchange);
+        
+        // Update ETH
+        document.getElementById('eth-oi').textContent = '$' + formatNumber(ethOI.total);
+        updateExchanges('eth-oi-exchanges', ethOI.byExchange);
+        
+        const ethFRVal = ethFR.average * 100;
+        document.getElementById('eth-fr').textContent = (ethFRVal >= 0 ? '+' : '') + ethFRVal.toFixed(4) + '%';
+        document.getElementById('eth-fr').className = 'metric-value ' + (ethFRVal >= 0 ? 'positive' : 'negative');
+        updateFRExchanges('eth-fr-exchanges', ethFR.byExchange);
+        
+        // Update Long/Short
+        if (btcLSHistory.history && btcLSHistory.history.length > 0) {
+          const latestBTC = btcLSHistory.history[btcLSHistory.history.length - 1];
+          document.getElementById('btc-ls').textContent = latestBTC.ratio.toFixed(2);
+          document.getElementById('btc-ls').className = 'metric-value ' + (latestBTC.ratio >= 1 ? 'positive' : 'negative');
+          const btcLongPct = latestBTC.long;
+          const btcShortPct = latestBTC.short;
+          document.getElementById('btc-ls-bar').style.width = btcLongPct + '%';
+          document.getElementById('btc-long-pct').textContent = 'Long: ' + btcLongPct.toFixed(1) + '%';
+          document.getElementById('btc-short-pct').textContent = 'Short: ' + btcShortPct.toFixed(1) + '%';
+        }
+        
+        if (ethLSHistory.history && ethLSHistory.history.length > 0) {
+          const latestETH = ethLSHistory.history[ethLSHistory.history.length - 1];
+          document.getElementById('eth-ls').textContent = latestETH.ratio.toFixed(2);
+          document.getElementById('eth-ls').className = 'metric-value ' + (latestETH.ratio >= 1 ? 'positive' : 'negative');
+          const ethLongPct = latestETH.long;
+          const ethShortPct = latestETH.short;
+          document.getElementById('eth-ls-bar').style.width = ethLongPct + '%';
+          document.getElementById('eth-long-pct').textContent = 'Long: ' + ethLongPct.toFixed(1) + '%';
+          document.getElementById('eth-short-pct').textContent = 'Short: ' + ethShortPct.toFixed(1) + '%';
+        }
+        
+        // Calculate 24h change for OI
+        if (btcOIHistory.history && btcOIHistory.history.length > 1) {
+          const first = btcOIHistory.history[0].value;
+          const last = btcOIHistory.history[btcOIHistory.history.length - 1].value;
+          const change = ((last - first) / first) * 100;
+          document.getElementById('btc-oi-change').textContent = '24h change: ' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%';
+        }
+        
+        if (ethOIHistory.history && ethOIHistory.history.length > 1) {
+          const first = ethOIHistory.history[0].value;
+          const last = ethOIHistory.history[ethOIHistory.history.length - 1].value;
+          const change = ((last - first) / first) * 100;
+          document.getElementById('eth-oi-change').textContent = '24h change: ' + (change >= 0 ? '+' : '') + change.toFixed(2) + '%';
+        }
+        
+        // Create charts
+        createChart('btc-oi-chart', btcOIHistory.history || [], '#4488ff');
+        createChart('eth-oi-chart', ethOIHistory.history || [], '#4488ff');
+        createChart('btc-fr-chart', btcFRHistory.history || [], '#00ff88', true);
+        createChart('eth-fr-chart', ethFRHistory.history || [], '#00ff88', true);
+        
+        // Long/Short ratio charts
+        if (btcLSHistory.history) {
+          createChart('btc-ls-chart', btcLSHistory.history.map(h => ({ t: h.t, value: h.ratio })), '#aa66ff');
+        }
+        if (ethLSHistory.history) {
+          createChart('eth-ls-chart', ethLSHistory.history.map(h => ({ t: h.t, value: h.ratio })), '#aa66ff');
+        }
+        
+        // Update timestamp
+        const now = new Date();
+        document.getElementById('last-update').textContent = 
+          'Updated: ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        
+        updateStatus(true, 'Live');
+        
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        updateStatus(false, 'Error');
+      }
+    }
+    
+    // Initial fetch
+    fetchData();
+    
+    // Auto-refresh every 60 seconds
+    setInterval(fetchData, 60000);
+  </script>
+</body>
+</html>
