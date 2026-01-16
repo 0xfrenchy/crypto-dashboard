@@ -16,23 +16,11 @@ app.use(express.static('public'));
 const COINALYZE_API = 'https://api.coinalyze.net/v1';
 const API_KEY = process.env.COINALYZE_API_KEY;
 
-// Symbol mappings for multiple exchanges
-// Format: SYMBOL_PERP.EXCHANGE_CODE
-// Exchange codes: A=Binance, 0=Bitmex, 6=Bybit, 5=OKX, 4=Deribit, B=Bitget
-const SYMBOLS = {
-  BTC: [
-    'BTCUSDT_PERP.A',   // Binance
-    'BTCUSDT_PERP.6',   // Bybit
-    'BTCUSDT_PERP.5',   // OKX
-    'BTCUSDT_PERP.B',   // Bitget
-  ],
-  ETH: [
-    'ETHUSDT_PERP.A',   // Binance
-    'ETHUSDT_PERP.6',   // Bybit
-    'ETHUSDT_PERP.5',   // OKX
-    'ETHUSDT_PERP.B',   // Bitget
-  ]
-};
+// Cache for exchange codes and symbols
+let exchangeMap = {};
+let btcSymbols = [];
+let ethSymbols = [];
+let symbolsInitialized = false;
 
 // Helper function to make API calls
 async function coinalyzeRequest(endpoint, params = {}) {
@@ -42,7 +30,8 @@ async function coinalyzeRequest(endpoint, params = {}) {
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      const text = await response.text();
+      throw new Error(`API error: ${response.status} - ${text}`);
     }
     return await response.json();
   } catch (error) {
@@ -51,28 +40,118 @@ async function coinalyzeRequest(endpoint, params = {}) {
   }
 }
 
+// Initialize: fetch exchanges and available symbols
+async function initializeSymbols() {
+  try {
+    console.log('🔍 Fetching available exchanges...');
+    const exchanges = await coinalyzeRequest('/exchanges');
+    
+    // Build exchange code -> name mapping
+    exchanges.forEach(ex => {
+      exchangeMap[ex.code] = ex.name;
+    });
+    console.log('📊 Available exchanges:', Object.values(exchangeMap).join(', '));
+
+    console.log('🔍 Fetching available futures markets...');
+    const markets = await coinalyzeRequest('/future-markets');
+    
+    // Filter for BTC and ETH USDT perpetuals
+    const btcMarkets = markets.filter(m => 
+      m.base_asset === 'BTC' && 
+      m.is_perpetual && 
+      m.quote_asset === 'USDT'
+    );
+    
+    const ethMarkets = markets.filter(m => 
+      m.base_asset === 'ETH' && 
+      m.is_perpetual && 
+      m.quote_asset === 'USDT'
+    );
+
+    btcSymbols = btcMarkets.map(m => m.symbol);
+    ethSymbols = ethMarkets.map(m => m.symbol);
+
+    console.log(`✅ Found ${btcSymbols.length} BTC perpetual markets:`, btcSymbols.slice(0, 10).join(', '), btcSymbols.length > 10 ? '...' : '');
+    console.log(`✅ Found ${ethSymbols.length} ETH perpetual markets:`, ethSymbols.slice(0, 10).join(', '), ethSymbols.length > 10 ? '...' : '');
+
+    symbolsInitialized = true;
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to initialize symbols:', error.message);
+    
+    // Fallback to known working symbols
+    console.log('⚠️ Using fallback symbols...');
+    exchangeMap = {
+      'A': 'Binance',
+      '6': 'Bybit', 
+      '5': 'OKX',
+      'B': 'Bitget',
+      '0': 'BitMEX',
+      '4': 'Deribit'
+    };
+    btcSymbols = ['BTCUSDT_PERP.A'];
+    ethSymbols = ['ETHUSDT_PERP.A'];
+    symbolsInitialized = true;
+    return false;
+  }
+}
+
+// Get exchange name from symbol
+function getExchangeName(symbol) {
+  const code = symbol.split('.')[1];
+  return exchangeMap[code] || code;
+}
+
+// Limit symbols to avoid rate limiting (max 20 per request)
+function limitSymbols(symbols, max = 8) {
+  // Prioritize major exchanges
+  const priority = ['A', '6', '5', 'B', '0', '4']; // Binance, Bybit, OKX, Bitget, BitMEX, Deribit
+  
+  const sorted = [...symbols].sort((a, b) => {
+    const codeA = a.split('.')[1];
+    const codeB = b.split('.')[1];
+    const indexA = priority.indexOf(codeA);
+    const indexB = priority.indexOf(codeB);
+    
+    if (indexA === -1 && indexB === -1) return 0;
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  });
+  
+  return sorted.slice(0, max);
+}
+
 // Get current open interest for a coin
 app.get('/api/open-interest/:coin', async (req, res) => {
   try {
+    if (!symbolsInitialized) await initializeSymbols();
+    
     const coin = req.params.coin.toUpperCase();
-    const symbols = SYMBOLS[coin];
+    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
     
     if (!symbols) {
       return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
     }
 
+    const limitedSymbols = limitSymbols(symbols);
+    console.log(`Fetching OI for ${coin}:`, limitedSymbols.join(', '));
+
     const data = await coinalyzeRequest('/open-interest', {
-      symbols: symbols.join(','),
+      symbols: limitedSymbols.join(','),
       convert_to_usd: 'true'
     });
 
     // Aggregate values from all exchanges
     const totalOI = data.reduce((sum, item) => sum + (item.value || 0), 0);
-    const byExchange = data.map(item => ({
-      exchange: getExchangeName(item.symbol),
-      value: item.value,
-      symbol: item.symbol
-    }));
+    const byExchange = data
+      .filter(item => item.value)
+      .map(item => ({
+        exchange: getExchangeName(item.symbol),
+        value: item.value,
+        symbol: item.symbol
+      }))
+      .sort((a, b) => b.value - a.value);
 
     res.json({
       coin,
@@ -81,6 +160,7 @@ app.get('/api/open-interest/:coin', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
+    console.error('OI Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -88,15 +168,19 @@ app.get('/api/open-interest/:coin', async (req, res) => {
 // Get current funding rate for a coin
 app.get('/api/funding-rate/:coin', async (req, res) => {
   try {
+    if (!symbolsInitialized) await initializeSymbols();
+    
     const coin = req.params.coin.toUpperCase();
-    const symbols = SYMBOLS[coin];
+    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
     
     if (!symbols) {
       return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
     }
 
+    const limitedSymbols = limitSymbols(symbols);
+    
     const data = await coinalyzeRequest('/funding-rate', {
-      symbols: symbols.join(',')
+      symbols: limitedSymbols.join(',')
     });
 
     // Calculate weighted average (simple average for now)
@@ -105,11 +189,14 @@ app.get('/api/funding-rate/:coin', async (req, res) => {
       ? validRates.reduce((sum, item) => sum + item.value, 0) / validRates.length 
       : 0;
 
-    const byExchange = data.map(item => ({
-      exchange: getExchangeName(item.symbol),
-      value: item.value,
-      symbol: item.symbol
-    }));
+    const byExchange = data
+      .filter(item => item.value !== null && item.value !== undefined)
+      .map(item => ({
+        exchange: getExchangeName(item.symbol),
+        value: item.value,
+        symbol: item.symbol
+      }))
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
     res.json({
       coin,
@@ -118,6 +205,7 @@ app.get('/api/funding-rate/:coin', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
+    console.error('FR Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -125,18 +213,21 @@ app.get('/api/funding-rate/:coin', async (req, res) => {
 // Get open interest history (24h)
 app.get('/api/open-interest-history/:coin', async (req, res) => {
   try {
+    if (!symbolsInitialized) await initializeSymbols();
+    
     const coin = req.params.coin.toUpperCase();
-    const symbols = SYMBOLS[coin];
+    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
     
     if (!symbols) {
       return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
     }
 
+    const limitedSymbols = limitSymbols(symbols, 5); // Fewer for history to save API calls
     const now = Math.floor(Date.now() / 1000);
     const oneDayAgo = now - (24 * 60 * 60);
 
     const data = await coinalyzeRequest('/open-interest-history', {
-      symbols: symbols.join(','),
+      symbols: limitedSymbols.join(','),
       interval: '1hour',
       from: oneDayAgo,
       to: now,
@@ -152,6 +243,7 @@ app.get('/api/open-interest-history/:coin', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
+    console.error('OI History Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -159,18 +251,21 @@ app.get('/api/open-interest-history/:coin', async (req, res) => {
 // Get funding rate history (24h)
 app.get('/api/funding-rate-history/:coin', async (req, res) => {
   try {
+    if (!symbolsInitialized) await initializeSymbols();
+    
     const coin = req.params.coin.toUpperCase();
-    const symbols = SYMBOLS[coin];
+    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
     
     if (!symbols) {
       return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
     }
 
+    const limitedSymbols = limitSymbols(symbols, 5);
     const now = Math.floor(Date.now() / 1000);
     const oneDayAgo = now - (24 * 60 * 60);
 
     const data = await coinalyzeRequest('/funding-rate-history', {
-      symbols: symbols.join(','),
+      symbols: limitedSymbols.join(','),
       interval: '1hour',
       from: oneDayAgo,
       to: now
@@ -185,6 +280,7 @@ app.get('/api/funding-rate-history/:coin', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
+    console.error('FR History Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -192,17 +288,22 @@ app.get('/api/funding-rate-history/:coin', async (req, res) => {
 // Get long/short ratio history (24h)
 app.get('/api/long-short-history/:coin', async (req, res) => {
   try {
-    const coin = req.params.coin.toUpperCase();
-    // Long/short ratio is only available on some exchanges
-    const symbols = coin === 'BTC' 
-      ? ['BTCUSDT_PERP.A', 'BTCUSDT_PERP.6'] 
-      : ['ETHUSDT_PERP.A', 'ETHUSDT_PERP.6'];
+    if (!symbolsInitialized) await initializeSymbols();
     
+    const coin = req.params.coin.toUpperCase();
+    const allSymbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
+    
+    if (!allSymbols) {
+      return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
+    }
+
+    // Long/short ratio - try major exchanges first
+    const limitedSymbols = limitSymbols(allSymbols, 4);
     const now = Math.floor(Date.now() / 1000);
     const oneDayAgo = now - (24 * 60 * 60);
 
     const data = await coinalyzeRequest('/long-short-ratio-history', {
-      symbols: symbols.join(','),
+      symbols: limitedSymbols.join(','),
       interval: '1hour',
       from: oneDayAgo,
       to: now
@@ -217,61 +318,88 @@ app.get('/api/long-short-history/:coin', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
+    console.error('LS History Error:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Debug endpoint - show what symbols are being used
+app.get('/api/debug', async (req, res) => {
+  if (!symbolsInitialized) await initializeSymbols();
+  
+  res.json({
+    exchanges: exchangeMap,
+    btcSymbols: btcSymbols,
+    ethSymbols: ethSymbols,
+    btcLimited: limitSymbols(btcSymbols),
+    ethLimited: limitSymbols(ethSymbols)
+  });
 });
 
 // Get all current data for dashboard
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const btcSymbols = SYMBOLS.BTC.join(',');
-    const ethSymbols = SYMBOLS.ETH.join(',');
-    const allSymbols = [...SYMBOLS.BTC, ...SYMBOLS.ETH].join(',');
+    if (!symbolsInitialized) await initializeSymbols();
+    
+    const btcLimited = limitSymbols(btcSymbols);
+    const ethLimited = limitSymbols(ethSymbols);
 
     // Fetch current data in parallel
     const [btcOI, ethOI, btcFR, ethFR] = await Promise.all([
-      coinalyzeRequest('/open-interest', { symbols: btcSymbols, convert_to_usd: 'true' }),
-      coinalyzeRequest('/open-interest', { symbols: ethSymbols, convert_to_usd: 'true' }),
-      coinalyzeRequest('/funding-rate', { symbols: btcSymbols }),
-      coinalyzeRequest('/funding-rate', { symbols: ethSymbols })
+      coinalyzeRequest('/open-interest', { symbols: btcLimited.join(','), convert_to_usd: 'true' }),
+      coinalyzeRequest('/open-interest', { symbols: ethLimited.join(','), convert_to_usd: 'true' }),
+      coinalyzeRequest('/funding-rate', { symbols: btcLimited.join(',') }),
+      coinalyzeRequest('/funding-rate', { symbols: ethLimited.join(',') })
     ]);
 
     // Aggregate
     const btcTotalOI = btcOI.reduce((sum, item) => sum + (item.value || 0), 0);
     const ethTotalOI = ethOI.reduce((sum, item) => sum + (item.value || 0), 0);
     
-    const btcAvgFR = btcFR.filter(i => i.value != null).reduce((sum, i) => sum + i.value, 0) / btcFR.filter(i => i.value != null).length || 0;
-    const ethAvgFR = ethFR.filter(i => i.value != null).reduce((sum, i) => sum + i.value, 0) / ethFR.filter(i => i.value != null).length || 0;
+    const btcValidFR = btcFR.filter(i => i.value != null);
+    const ethValidFR = ethFR.filter(i => i.value != null);
+    
+    const btcAvgFR = btcValidFR.length ? btcValidFR.reduce((sum, i) => sum + i.value, 0) / btcValidFR.length : 0;
+    const ethAvgFR = ethValidFR.length ? ethValidFR.reduce((sum, i) => sum + i.value, 0) / ethValidFR.length : 0;
 
     res.json({
       btc: {
-        openInterest: { total: btcTotalOI, byExchange: btcOI.map(i => ({ exchange: getExchangeName(i.symbol), value: i.value })) },
-        fundingRate: { average: btcAvgFR, byExchange: btcFR.map(i => ({ exchange: getExchangeName(i.symbol), value: i.value })) }
+        openInterest: { 
+          total: btcTotalOI, 
+          byExchange: btcOI
+            .filter(i => i.value)
+            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
+            .sort((a, b) => b.value - a.value)
+        },
+        fundingRate: { 
+          average: btcAvgFR, 
+          byExchange: btcFR
+            .filter(i => i.value != null)
+            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
+        }
       },
       eth: {
-        openInterest: { total: ethTotalOI, byExchange: ethOI.map(i => ({ exchange: getExchangeName(i.symbol), value: i.value })) },
-        fundingRate: { average: ethAvgFR, byExchange: ethFR.map(i => ({ exchange: getExchangeName(i.symbol), value: i.value })) }
+        openInterest: { 
+          total: ethTotalOI, 
+          byExchange: ethOI
+            .filter(i => i.value)
+            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
+            .sort((a, b) => b.value - a.value)
+        },
+        fundingRate: { 
+          average: ethAvgFR, 
+          byExchange: ethFR
+            .filter(i => i.value != null)
+            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
+        }
       },
       timestamp: Date.now()
     });
   } catch (error) {
+    console.error('Dashboard Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
-// Helper: Get exchange name from symbol
-function getExchangeName(symbol) {
-  const code = symbol.split('.')[1];
-  const exchanges = {
-    'A': 'Binance',
-    '0': 'BitMEX',
-    '6': 'Bybit',
-    '5': 'OKX',
-    '4': 'Deribit',
-    'B': 'Bitget'
-  };
-  return exchanges[code] || code;
-}
 
 // Helper: Aggregate history data (sum values at each timestamp)
 function aggregateHistoryData(data) {
@@ -352,7 +480,10 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Crypto Dashboard server running on port ${PORT}`);
   console.log(`📊 Open http://localhost:${PORT} in your browser`);
+  
+  // Initialize symbols on startup
+  await initializeSymbols();
 });
