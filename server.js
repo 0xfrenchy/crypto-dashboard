@@ -11,9 +11,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// ============================================
+// API CONFIGURATIONS
+// ============================================
 const COINALYZE_API = 'https://api.coinalyze.net/v1';
-const API_KEY = process.env.COINALYZE_API_KEY;
+const COINALYZE_KEY = process.env.COINALYZE_API_KEY;
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
+const COINGECKO_API = 'https://api.coingecko.com/api/v3';
+const COINGECKO_KEY = process.env.COINGECKO_API_KEY || 'CG-64awckmxDZPeGecjjAGVeh3V';
 
 const COINALYZE_EXCHANGES = {
   'A': 'Binance',
@@ -22,6 +27,9 @@ const COINALYZE_EXCHANGES = {
   '3': 'OKX'
 };
 
+// ============================================
+// CACHE
+// ============================================
 const cache = {
   btcSymbols: [],
   ethSymbols: [],
@@ -30,7 +38,8 @@ const cache = {
     btcFR: null, ethFR: null,
     btcOIHistory: null, ethOIHistory: null,
     btcFRHistory: null, ethFRHistory: null,
-    btcLSHistory: null, ethLSHistory: null
+    btcLSHistory: null, ethLSHistory: null,
+    coingecko: null
   },
   lastUpdate: null,
   isRefreshing: false
@@ -42,7 +51,7 @@ const CACHE_TTL = 60 * 1000;
 // API HELPERS
 // ============================================
 async function coinalyzeRequest(endpoint, params = {}, retries = 3) {
-  const queryParams = new URLSearchParams({ ...params, api_key: API_KEY });
+  const queryParams = new URLSearchParams({ ...params, api_key: COINALYZE_KEY });
   const url = `${COINALYZE_API}${endpoint}?${queryParams}`;
   
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -50,11 +59,11 @@ async function coinalyzeRequest(endpoint, params = {}, retries = 3) {
       const response = await fetch(url);
       if (response.status === 429) {
         const retryAfter = parseInt(response.headers.get('Retry-After') || '5');
-        console.log(`⏳ Rate limited, waiting ${retryAfter}s`);
+        console.log(`⏳ Coinalyze rate limited, waiting ${retryAfter}s`);
         await sleep(retryAfter * 1000);
         continue;
       }
-      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      if (!response.ok) throw new Error(`Coinalyze API error: ${response.status}`);
       return await response.json();
     } catch (error) {
       if (attempt === retries) {
@@ -86,12 +95,35 @@ async function hyperliquidRequest(body, retries = 3) {
   }
 }
 
+async function coingeckoRequest(endpoint, retries = 3) {
+  const url = `${COINGECKO_API}${endpoint}${endpoint.includes('?') ? '&' : '?'}x_cg_demo_api_key=${COINGECKO_KEY}`;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (response.status === 429) {
+        console.log('⏳ CoinGecko rate limited, waiting 60s');
+        await sleep(60000);
+        continue;
+      }
+      if (!response.ok) throw new Error(`CoinGecko API error: ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      if (attempt === retries) {
+        console.error(`❌ CoinGecko ${endpoint} failed:`, error.message);
+        return null;
+      }
+      await sleep(2000 * attempt);
+    }
+  }
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ============================================
-// INITIALIZE
+// INITIALIZE COINALYZE SYMBOLS
 // ============================================
 async function initializeSymbols() {
   try {
@@ -112,9 +144,8 @@ async function initializeSymbols() {
     cache.btcSymbols = pickOnePerExchange(btcMarkets);
     cache.ethSymbols = pickOnePerExchange(ethMarkets);
 
-    console.log(`   BTC symbols: ${cache.btcSymbols.join(', ')}`);
-    console.log(`   ETH symbols: ${cache.ethSymbols.join(', ')}`);
-    
+    console.log(`   BTC: ${cache.btcSymbols.join(', ')}`);
+    console.log(`   ETH: ${cache.ethSymbols.join(', ')}`);
     return true;
   } catch (error) {
     console.error('❌ Failed to initialize:', error.message);
@@ -137,7 +168,7 @@ function pickOnePerExchange(markets) {
 }
 
 // ============================================
-// FETCH HYPERLIQUID
+// FETCH HYPERLIQUID (Direct API)
 // ============================================
 async function fetchHyperliquidData() {
   try {
@@ -153,27 +184,24 @@ async function fetchHyperliquidData() {
     
     if (btcIndex !== -1 && assetCtxs[btcIndex]) {
       const ctx = assetCtxs[btcIndex];
-      // Hyperliquid funding is hourly as decimal (e.g., 0.0000125)
-      // Convert to 8-hour percentage to match Coinalyze format
-      // hourly_decimal * 8 * 100 = 8hr_percentage
-      // But Coinalyze returns percentage directly (0.003 = 0.003%)
-      // So: hourly_decimal * 8 * 100 = 8hr_percentage
-      // Example: 0.0000125 * 8 * 100 = 0.01 (meaning 0.01%)
-      const hourlyRate = parseFloat(ctx.funding);
+      // FIXED: API returns the 8-hour funding rate as decimal
+      // Just multiply by 100 to convert to percentage
+      // e.g., 0.000013 * 100 = 0.0013%
+      const fundingDecimal = parseFloat(ctx.funding);
       btcData = {
         openInterest: parseFloat(ctx.openInterest) * parseFloat(ctx.markPx),
-        fundingRate: hourlyRate * 8 * 100, // Convert to 8hr percentage format
+        fundingRate: fundingDecimal * 100, // Convert decimal to percentage
         markPrice: parseFloat(ctx.markPx)
       };
-      console.log(`     BTC Hyperliquid raw funding: ${hourlyRate}, normalized: ${btcData.fundingRate}`);
+      console.log(`     BTC Hyperliquid: funding=${fundingDecimal} → ${btcData.fundingRate.toFixed(4)}%`);
     }
     
     if (ethIndex !== -1 && assetCtxs[ethIndex]) {
       const ctx = assetCtxs[ethIndex];
-      const hourlyRate = parseFloat(ctx.funding);
+      const fundingDecimal = parseFloat(ctx.funding);
       ethData = {
         openInterest: parseFloat(ctx.openInterest) * parseFloat(ctx.markPx),
-        fundingRate: hourlyRate * 8 * 100,
+        fundingRate: fundingDecimal * 100,
         markPrice: parseFloat(ctx.markPx)
       };
     }
@@ -182,6 +210,70 @@ async function fetchHyperliquidData() {
   } catch (error) {
     console.error('  ❌ Hyperliquid error:', error.message);
     return { btc: null, eth: null };
+  }
+}
+
+// ============================================
+// FETCH COINGECKO DERIVATIVES
+// ============================================
+async function fetchCoinGeckoDerivatives() {
+  try {
+    console.log('  🦎 Fetching CoinGecko derivatives...');
+    
+    const tickers = await coingeckoRequest('/derivatives');
+    if (!tickers) return null;
+    
+    // Filter for BTC and ETH perpetuals
+    const btcTickers = tickers.filter(t => 
+      t.symbol && 
+      (t.symbol.toUpperCase().includes('BTC') || t.symbol.toUpperCase().includes('XBT')) &&
+      t.contract_type === 'perpetual'
+    );
+    
+    const ethTickers = tickers.filter(t => 
+      t.symbol && 
+      t.symbol.toUpperCase().includes('ETH') &&
+      t.contract_type === 'perpetual'
+    );
+    
+    const processExchange = (data) => {
+      const byExchange = {};
+      data.forEach(t => {
+        const exchange = t.market || 'Unknown';
+        if (!byExchange[exchange]) {
+          byExchange[exchange] = {
+            openInterest: 0,
+            fundingRate: null,
+            volume24h: 0,
+            count: 0
+          };
+        }
+        if (t.open_interest) byExchange[exchange].openInterest += t.open_interest;
+        if (t.funding_rate != null) {
+          if (byExchange[exchange].fundingRate === null) {
+            byExchange[exchange].fundingRate = t.funding_rate;
+          } else {
+            byExchange[exchange].fundingRate = (byExchange[exchange].fundingRate + t.funding_rate) / 2;
+          }
+        }
+        if (t.volume_24h) byExchange[exchange].volume24h += t.volume_24h;
+        byExchange[exchange].count++;
+      });
+      return byExchange;
+    };
+    
+    const result = {
+      btc: processExchange(btcTickers),
+      eth: processExchange(ethTickers),
+      timestamp: Date.now()
+    };
+    
+    console.log(`     Found ${Object.keys(result.btc).length} BTC exchanges, ${Object.keys(result.eth).length} ETH exchanges`);
+    return result;
+    
+  } catch (error) {
+    console.error('  ❌ CoinGecko error:', error.message);
+    return null;
   }
 }
 
@@ -203,21 +295,18 @@ async function refreshAllData() {
 
     const hyperliquid = await fetchHyperliquidData();
     await sleep(500);
+    
+    const coingeckoData = await fetchCoinGeckoDerivatives();
+    cache.data.coingecko = coingeckoData;
+    await sleep(1000);
 
-    console.log('  📈 Fetching current data...');
+    console.log('  📈 Fetching Coinalyze current data...');
     const [coinalyzeBtcOI, coinalyzeEthOI, coinalyzeBtcFR, coinalyzeEthFR] = await Promise.all([
       coinalyzeRequest('/open-interest', { symbols: btcSymbolsStr, convert_to_usd: 'true' }),
       coinalyzeRequest('/open-interest', { symbols: ethSymbolsStr, convert_to_usd: 'true' }),
       coinalyzeRequest('/funding-rate', { symbols: btcSymbolsStr }),
       coinalyzeRequest('/funding-rate', { symbols: ethSymbolsStr })
     ]);
-    
-    // Debug: Log raw funding rate values
-    console.log('  📊 Raw Coinalyze FR values:');
-    coinalyzeBtcFR.forEach(item => {
-      console.log(`     ${item.symbol}: ${item.value}`);
-    });
-    
     await sleep(2000);
 
     console.log('  📊 Fetching 5-day history...');
@@ -241,11 +330,9 @@ async function refreshAllData() {
     ]);
     await sleep(2000);
 
-    // Long/Short Ratio - Binance has this data
     console.log('  ⚖️ Fetching Long/Short...');
     let btcLSHist = [], ethLSHist = [];
     try {
-      // Use Binance symbol for L/S ratio
       const btcBinanceSymbol = cache.btcSymbols.find(s => s.includes('.A'));
       const ethBinanceSymbol = cache.ethSymbols.find(s => s.includes('.A'));
       
@@ -253,7 +340,6 @@ async function refreshAllData() {
         btcLSHist = await coinalyzeRequest('/long-short-ratio-history', {
           symbols: btcBinanceSymbol, interval: '4hour', from: fiveDaysAgo, to: now
         });
-        console.log(`     BTC L/S from ${btcBinanceSymbol}: ${btcLSHist?.[0]?.history?.length || 0} points`);
       }
       await sleep(1500);
       
@@ -261,10 +347,9 @@ async function refreshAllData() {
         ethLSHist = await coinalyzeRequest('/long-short-ratio-history', {
           symbols: ethBinanceSymbol, interval: '4hour', from: fiveDaysAgo, to: now
         });
-        console.log(`     ETH L/S from ${ethBinanceSymbol}: ${ethLSHist?.[0]?.history?.length || 0} points`);
       }
     } catch (e) {
-      console.log('     L/S fetch error:', e.message);
+      console.log('     L/S error:', e.message);
     }
 
     // Store Open Interest
@@ -279,8 +364,6 @@ async function refreshAllData() {
     }
     
     // Store Funding Rates
-    // Coinalyze returns values like 0.003 meaning 0.003% - store as-is
-    // Filter out obviously bad values (> 1 would mean > 1% which is extreme)
     cache.data.btcFR = coinalyzeBtcFR.filter(item => 
       item.value !== null && item.value !== undefined && Math.abs(item.value) < 1
     );
@@ -288,7 +371,7 @@ async function refreshAllData() {
       item.value !== null && item.value !== undefined && Math.abs(item.value) < 1
     );
     
-    // Add Hyperliquid (already converted to same format above)
+    // Add Hyperliquid funding (already in percentage form)
     if (hyperliquid.btc && Math.abs(hyperliquid.btc.fundingRate) < 1) {
       cache.data.btcFR.push({ symbol: 'BTC.HYPERLIQUID', value: hyperliquid.btc.fundingRate });
     }
@@ -404,9 +487,6 @@ function processLSHistory(data) {
     if (item.history && Array.isArray(item.history)) {
       item.history.forEach(point => {
         if (point.r != null) {
-          // r = long/short ratio
-          // l = long percentage (0-100)
-          // s = short percentage (0-100)
           allPoints.push({
             t: parseInt(point.t) * 1000,
             ratio: point.r,
@@ -431,9 +511,8 @@ function analyzeTrend(coin) {
   
   let signals = { bullish: 0, bearish: 0, reasons: [] };
   
-  // 1. Funding Rate (values are in percentage form, e.g., 0.003 = 0.003%)
   const avgFR = aggregateFR(frData).average;
-  if (avgFR > 0.001) { // > 0.001%
+  if (avgFR > 0.001) {
     signals.bullish += 1;
     signals.reasons.push('Positive funding rate indicates bullish sentiment');
   } else if (avgFR < -0.001) {
@@ -441,7 +520,6 @@ function analyzeTrend(coin) {
     signals.reasons.push('Negative funding rate indicates bearish sentiment');
   }
   
-  // 2. OI Trend
   if (oiHistory.length >= 6) {
     const firstThird = oiHistory.slice(0, Math.floor(oiHistory.length / 3));
     const lastThird = oiHistory.slice(-Math.floor(oiHistory.length / 3));
@@ -458,7 +536,6 @@ function analyzeTrend(coin) {
     }
   }
   
-  // 3. Long/Short
   if (lsHistory.length > 0) {
     const latest = lsHistory[lsHistory.length - 1];
     if (latest.ratio > 1.1) {
@@ -521,9 +598,7 @@ app.get('/api/long-short-history/:coin', (req, res) => {
   const coin = req.params.coin.toUpperCase();
   const data = coin === 'BTC' ? cache.data.btcLSHistory : cache.data.ethLSHistory;
   if (!data) return res.status(503).json({ error: 'Loading...' });
-  const processed = processLSHistory(data);
-  console.log(`L/S API for ${coin}: ${processed.length} points`);
-  res.json({ coin, history: processed, timestamp: cache.lastUpdate });
+  res.json({ coin, history: processLSHistory(data), timestamp: cache.lastUpdate });
 });
 
 app.get('/api/trend/:coin', (req, res) => {
@@ -532,13 +607,49 @@ app.get('/api/trend/:coin', (req, res) => {
   res.json({ coin, ...analyzeTrend(coin), timestamp: cache.lastUpdate });
 });
 
+// CoinGecko derivatives endpoint
+app.get('/api/coingecko/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase();
+  const data = cache.data.coingecko;
+  
+  if (!data) return res.status(503).json({ error: 'Loading...' });
+  
+  const coinData = coin === 'BTC' ? data.btc : data.eth;
+  if (!coinData) return res.status(503).json({ error: 'No data' });
+  
+  const exchanges = Object.entries(coinData)
+    .filter(([name, d]) => d.openInterest > 0 || d.fundingRate !== null)
+    .map(([name, d]) => ({
+      exchange: name,
+      openInterest: d.openInterest,
+      fundingRate: d.fundingRate,
+      volume24h: d.volume24h
+    }))
+    .sort((a, b) => b.openInterest - a.openInterest)
+    .slice(0, 10);
+  
+  const totalOI = exchanges.reduce((s, e) => s + (e.openInterest || 0), 0);
+  const frExchanges = exchanges.filter(e => e.fundingRate !== null);
+  const avgFR = frExchanges.length > 0
+    ? frExchanges.reduce((s, e) => s + e.fundingRate, 0) / frExchanges.length
+    : null;
+  
+  res.json({
+    coin,
+    totalOpenInterest: totalOI,
+    averageFundingRate: avgFR,
+    exchanges,
+    timestamp: data.timestamp
+  });
+});
+
 app.get('/api/debug', (req, res) => {
   res.json({
     btcSymbols: cache.btcSymbols,
     ethSymbols: cache.ethSymbols,
     lastUpdate: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null,
     sampleFR: cache.data.btcFR,
-    sampleLS: cache.data.btcLSHistory?.[0]?.history?.slice(-3)
+    coingeckoExchanges: cache.data.coingecko ? Object.keys(cache.data.coingecko.btc || {}) : []
   });
 });
 
@@ -555,7 +666,10 @@ app.listen(PORT, async () => {
   console.log('   🚀 Crypto Derivatives Dashboard');
   console.log('═══════════════════════════════════════════════════════════');
   console.log(`   Server: http://localhost:${PORT}`);
-  console.log('   Exchanges: Binance, Bybit, Huobi, OKX, Hyperliquid');
+  console.log('   Data Sources:');
+  console.log('   • Coinalyze: Binance, Bybit, Huobi, OKX');
+  console.log('   • Hyperliquid: Direct API');
+  console.log('   • CoinGecko: 100+ Derivatives Exchanges');
   console.log('═══════════════════════════════════════════════════════════');
   console.log('');
   

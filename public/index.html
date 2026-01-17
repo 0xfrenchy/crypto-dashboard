@@ -42,7 +42,6 @@
       padding: 24px;
     }
 
-    /* Header */
     header {
       display: flex;
       justify-content: space-between;
@@ -97,7 +96,6 @@
       50% { opacity: 0.5; }
     }
 
-    /* Main Grid */
     .dashboard {
       display: flex;
       flex-direction: column;
@@ -157,7 +155,6 @@
       color: var(--text-muted);
     }
 
-    /* Trend Badge */
     .trend-badge {
       display: flex;
       align-items: center;
@@ -183,11 +180,6 @@
       color: var(--text-secondary);
     }
 
-    .trend-badge .arrow {
-      font-size: 16px;
-    }
-
-    /* Content Grid */
     .coin-content {
       padding: 24px;
     }
@@ -203,7 +195,6 @@
       .metrics-row { grid-template-columns: 1fr; }
     }
 
-    /* Metric Card */
     .metric-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -290,7 +281,6 @@
       font-family: 'JetBrains Mono', monospace;
     }
 
-    /* Exchange List */
     .exchange-list {
       display: flex;
       flex-wrap: wrap;
@@ -323,7 +313,6 @@
     .exchange-item .value.positive { color: var(--green); }
     .exchange-item .value.negative { color: var(--red); }
 
-    /* Long/Short Bar */
     .ls-container { margin-top: 12px; }
 
     .ls-bar {
@@ -350,18 +339,20 @@
     .ls-labels .long { color: var(--green); }
     .ls-labels .short { color: var(--red); }
 
-    /* Charts Section */
     .charts-section {
       margin-top: 24px;
     }
 
-    .charts-section h3 {
+    .section-title {
       font-size: 14px;
       font-weight: 600;
       color: var(--text-secondary);
       margin-bottom: 16px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .charts-grid {
@@ -393,7 +384,6 @@
       position: relative;
     }
 
-    /* Trend Reasons */
     .trend-section {
       margin-top: 24px;
       padding: 20px;
@@ -438,7 +428,93 @@
     .trend-reason.bullish .dot { background: var(--green); }
     .trend-reason.bearish .dot { background: var(--red); }
 
-    /* Footer */
+    /* CoinGecko Section */
+    .coingecko-section {
+      margin-top: 24px;
+      padding: 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .coingecko-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .coingecko-header h3 {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .coingecko-header .badge {
+      font-size: 10px;
+      padding: 3px 8px;
+      background: var(--purple);
+      color: white;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+
+    .coingecko-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .coingecko-stat {
+      padding: 12px;
+      background: var(--bg-primary);
+      border-radius: 8px;
+    }
+
+    .coingecko-stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .coingecko-stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .coingecko-exchanges {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .cg-exchange {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      background: var(--bg-primary);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .cg-exchange .name {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .cg-exchange .fr {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+    }
+
+    .cg-exchange .fr.positive { color: var(--green); }
+    .cg-exchange .fr.negative { color: var(--red); }
+
     footer {
       text-align: center;
       padding: 24px 0;
@@ -453,7 +529,6 @@
       text-decoration: none;
     }
 
-    /* Loading */
     .loading {
       display: flex;
       align-items: center;
@@ -508,7 +583,6 @@
         
         <div class="coin-content">
           <div class="metrics-row">
-            <!-- Open Interest -->
             <div class="metric-card">
               <div class="metric-header">
                 <span class="metric-label">
@@ -516,7 +590,7 @@
                   <span class="info-btn">?
                     <div class="tooltip">
                       <h4>Open Interest</h4>
-                      Total value of outstanding futures contracts. Rising OI with rising price = strong trend. Falling OI = positions closing.
+                      Total value of outstanding futures contracts. Rising OI with rising price = strong trend.
                     </div>
                   </span>
                 </span>
@@ -526,15 +600,14 @@
               <div class="exchange-list" id="btc-oi-exchanges"></div>
             </div>
 
-            <!-- Funding Rate -->
             <div class="metric-card">
               <div class="metric-header">
                 <span class="metric-label">
                   Funding Rate
                   <span class="info-btn">?
                     <div class="tooltip">
-                      <h4>Funding Rate</h4>
-                      Fee paid every 8h between longs/shorts. Positive = longs pay shorts (bullish). Negative = shorts pay longs (bearish).
+                      <h4>Funding Rate (8hr)</h4>
+                      Fee paid every 8h. Positive = longs pay shorts (bullish). Negative = shorts pay longs (bearish).
                     </div>
                   </span>
                 </span>
@@ -544,7 +617,6 @@
               <div class="exchange-list" id="btc-fr-exchanges"></div>
             </div>
 
-            <!-- Long/Short Ratio -->
             <div class="metric-card">
               <div class="metric-header">
                 <span class="metric-label">
@@ -552,7 +624,7 @@
                   <span class="info-btn">?
                     <div class="tooltip">
                       <h4>Long/Short Ratio</h4>
-                      Ratio of longs to shorts. &gt;1 = more longs (bullish sentiment). &lt;1 = more shorts (bearish). Extremes often precede reversals.
+                      Ratio of longs to shorts. &gt;1 = more longs. &lt;1 = more shorts.
                     </div>
                   </span>
                 </span>
@@ -568,9 +640,8 @@
             </div>
           </div>
 
-          <!-- Charts -->
           <div class="charts-section">
-            <h3>📊 5-Day History</h3>
+            <h3 class="section-title">📊 5-Day History</h3>
             <div class="charts-grid">
               <div class="chart-card">
                 <h4>Open Interest</h4>
@@ -583,7 +654,25 @@
             </div>
           </div>
 
-          <!-- Trend Analysis -->
+          <!-- CoinGecko Section -->
+          <div class="coingecko-section" id="btc-coingecko">
+            <div class="coingecko-header">
+              <h3>🦎 CoinGecko Derivatives</h3>
+              <span class="badge">100+ Exchanges</span>
+            </div>
+            <div class="coingecko-stats">
+              <div class="coingecko-stat">
+                <div class="coingecko-stat-label">Total Open Interest</div>
+                <div class="coingecko-stat-value" id="btc-cg-oi">--</div>
+              </div>
+              <div class="coingecko-stat">
+                <div class="coingecko-stat-label">Avg Funding Rate</div>
+                <div class="coingecko-stat-value" id="btc-cg-fr">--</div>
+              </div>
+            </div>
+            <div class="coingecko-exchanges" id="btc-cg-exchanges"></div>
+          </div>
+
           <div class="trend-section">
             <h3>🎯 Trend Analysis</h3>
             <div class="trend-reasons" id="btc-trend-reasons">
@@ -618,7 +707,7 @@
                   <span class="info-btn">?
                     <div class="tooltip">
                       <h4>Open Interest</h4>
-                      Total value of outstanding futures contracts. Rising OI with rising price = strong trend. Falling OI = positions closing.
+                      Total value of outstanding futures contracts.
                     </div>
                   </span>
                 </span>
@@ -634,8 +723,8 @@
                   Funding Rate
                   <span class="info-btn">?
                     <div class="tooltip">
-                      <h4>Funding Rate</h4>
-                      Fee paid every 8h between longs/shorts. Positive = longs pay shorts (bullish). Negative = shorts pay longs (bearish).
+                      <h4>Funding Rate (8hr)</h4>
+                      Fee paid every 8h between longs and shorts.
                     </div>
                   </span>
                 </span>
@@ -652,7 +741,7 @@
                   <span class="info-btn">?
                     <div class="tooltip">
                       <h4>Long/Short Ratio</h4>
-                      Ratio of longs to shorts. &gt;1 = more longs (bullish sentiment). &lt;1 = more shorts (bearish). Extremes often precede reversals.
+                      Ratio of longs to shorts positions.
                     </div>
                   </span>
                 </span>
@@ -669,7 +758,7 @@
           </div>
 
           <div class="charts-section">
-            <h3>📊 5-Day History</h3>
+            <h3 class="section-title">📊 5-Day History</h3>
             <div class="charts-grid">
               <div class="chart-card">
                 <h4>Open Interest</h4>
@@ -680,6 +769,25 @@
                 <div class="chart-wrapper"><canvas id="eth-fr-chart"></canvas></div>
               </div>
             </div>
+          </div>
+
+          <!-- CoinGecko Section -->
+          <div class="coingecko-section" id="eth-coingecko">
+            <div class="coingecko-header">
+              <h3>🦎 CoinGecko Derivatives</h3>
+              <span class="badge">100+ Exchanges</span>
+            </div>
+            <div class="coingecko-stats">
+              <div class="coingecko-stat">
+                <div class="coingecko-stat-label">Total Open Interest</div>
+                <div class="coingecko-stat-value" id="eth-cg-oi">--</div>
+              </div>
+              <div class="coingecko-stat">
+                <div class="coingecko-stat-label">Avg Funding Rate</div>
+                <div class="coingecko-stat-value" id="eth-cg-fr">--</div>
+              </div>
+            </div>
+            <div class="coingecko-exchanges" id="eth-cg-exchanges"></div>
           </div>
 
           <div class="trend-section">
@@ -693,7 +801,7 @@
     </main>
 
     <footer>
-      Data from <a href="https://coinalyze.net" target="_blank">Coinalyze</a> & <a href="https://hyperliquid.xyz" target="_blank">Hyperliquid</a> • Auto-refreshes every 60s
+      Data from <a href="https://coinalyze.net" target="_blank">Coinalyze</a>, <a href="https://hyperliquid.xyz" target="_blank">Hyperliquid</a> & <a href="https://coingecko.com" target="_blank">CoinGecko</a> • Auto-refreshes every 60s
     </footer>
   </div>
 
@@ -701,28 +809,23 @@
     const API = window.location.origin;
     const charts = {};
 
-    // Formatters
     const formatNum = n => {
       if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
       if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
       return '$' + n.toFixed(2);
     };
 
-    // Coinalyze returns funding rate in percentage form (0.003 = 0.003%)
-    // So we display it directly without multiplying by 100
+    // Funding rates are already in percentage form (0.003 = 0.003%)
     const formatPct = n => {
       return (n >= 0 ? '+' : '') + n.toFixed(4) + '%';
     };
 
-    // Create chart with proper axes
-    // isPercent means the data is already in percentage form (e.g., 0.003 = 0.003%)
     function createChart(canvasId, data, label, color, isPercent = false) {
       const ctx = document.getElementById(canvasId);
       if (!ctx || !data.length) return;
 
       if (charts[canvasId]) charts[canvasId].destroy();
 
-      // For percentage data, values are already in percentage form (0.003 = 0.003%)
       const values = data.map(d => d.value);
       const labels = data.map(d => d.t);
 
@@ -746,10 +849,7 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          interaction: {
-            mode: 'index',
-            intersect: false
-          },
+          interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: { display: false },
             tooltip: {
@@ -776,16 +876,9 @@
           scales: {
             x: {
               type: 'time',
-              time: {
-                unit: 'day',
-                displayFormats: { day: 'MMM d' }
-              },
+              time: { unit: 'day', displayFormats: { day: 'MMM d' } },
               grid: { color: '#21262d', drawBorder: false },
-              ticks: { 
-                color: '#6e7681', 
-                font: { family: 'JetBrains Mono', size: 10 },
-                maxTicksLimit: 5
-              }
+              ticks: { color: '#6e7681', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 5 }
             },
             y: {
               position: 'right',
@@ -801,7 +894,6 @@
       });
     }
 
-    // Update exchanges display
     function updateExchanges(id, exchanges, isOI = true) {
       const el = document.getElementById(id);
       if (!el || !exchanges) return;
@@ -816,7 +908,6 @@
       }).join('');
     }
 
-    // Update trend badge
     function updateTrendBadge(coin, trend) {
       const badge = document.getElementById(`${coin}-trend-badge`);
       if (!badge) return;
@@ -827,7 +918,6 @@
       badge.innerHTML = `<span class="arrow">${arrow}</span><span>${label} (${trend.confidence})</span>`;
     }
 
-    // Update trend reasons
     function updateTrendReasons(coin, trend) {
       const el = document.getElementById(`${coin}-trend-reasons`);
       if (!el) return;
@@ -847,13 +937,38 @@
       }).join('');
     }
 
-    // Fetch all data
+    function updateCoinGecko(coin, data) {
+      if (!data) return;
+      
+      const oiEl = document.getElementById(`${coin}-cg-oi`);
+      const frEl = document.getElementById(`${coin}-cg-fr`);
+      const exchEl = document.getElementById(`${coin}-cg-exchanges`);
+      
+      if (oiEl) oiEl.textContent = formatNum(data.totalOpenInterest || 0);
+      if (frEl && data.averageFundingRate !== null) {
+        frEl.textContent = formatPct(data.averageFundingRate);
+        frEl.className = 'coingecko-stat-value ' + (data.averageFundingRate >= 0 ? 'positive' : 'negative');
+      }
+      
+      if (exchEl && data.exchanges) {
+        exchEl.innerHTML = data.exchanges.slice(0, 8).map(e => {
+          const fr = e.fundingRate !== null ? formatPct(e.fundingRate) : 'N/A';
+          const cls = e.fundingRate !== null ? (e.fundingRate >= 0 ? 'positive' : 'negative') : '';
+          return `<div class="cg-exchange">
+            <span class="name">${e.exchange}</span>
+            <span class="fr ${cls}">${fr}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+
     async function fetchData() {
       try {
         const [
           btcOI, ethOI, btcFR, ethFR,
           btcOIHist, ethOIHist, btcFRHist, ethFRHist,
-          btcLS, ethLS, btcTrend, ethTrend
+          btcLS, ethLS, btcTrend, ethTrend,
+          btcCG, ethCG
         ] = await Promise.all([
           fetch(`${API}/api/open-interest/btc`).then(r => r.json()),
           fetch(`${API}/api/open-interest/eth`).then(r => r.json()),
@@ -866,25 +981,25 @@
           fetch(`${API}/api/long-short-history/btc`).then(r => r.json()),
           fetch(`${API}/api/long-short-history/eth`).then(r => r.json()),
           fetch(`${API}/api/trend/btc`).then(r => r.json()),
-          fetch(`${API}/api/trend/eth`).then(r => r.json())
+          fetch(`${API}/api/trend/eth`).then(r => r.json()),
+          fetch(`${API}/api/coingecko/btc`).then(r => r.json()).catch(() => null),
+          fetch(`${API}/api/coingecko/eth`).then(r => r.json()).catch(() => null)
         ]);
 
         // BTC
         document.getElementById('btc-oi').textContent = formatNum(btcOI.total);
         updateExchanges('btc-oi-exchanges', btcOI.byExchange, true);
 
-        const btcFRVal = btcFR.average;
         document.getElementById('btc-fr').textContent = formatPct(btcFR.average);
-        document.getElementById('btc-fr').className = 'metric-value ' + (btcFRVal >= 0 ? 'positive' : 'negative');
+        document.getElementById('btc-fr').className = 'metric-value ' + (btcFR.average >= 0 ? 'positive' : 'negative');
         updateExchanges('btc-fr-exchanges', btcFR.byExchange, false);
 
         // ETH
         document.getElementById('eth-oi').textContent = formatNum(ethOI.total);
         updateExchanges('eth-oi-exchanges', ethOI.byExchange, true);
 
-        const ethFRVal = ethFR.average;
         document.getElementById('eth-fr').textContent = formatPct(ethFR.average);
-        document.getElementById('eth-fr').className = 'metric-value ' + (ethFRVal >= 0 ? 'positive' : 'negative');
+        document.getElementById('eth-fr').className = 'metric-value ' + (ethFR.average >= 0 ? 'positive' : 'negative');
         updateExchanges('eth-fr-exchanges', ethFR.byExchange, false);
 
         // Long/Short
@@ -933,6 +1048,10 @@
         updateTrendReasons('btc', btcTrend);
         updateTrendReasons('eth', ethTrend);
 
+        // CoinGecko
+        updateCoinGecko('btc', btcCG);
+        updateCoinGecko('eth', ethCG);
+
         // Update time
         document.getElementById('last-update').textContent = 
           'Updated: ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -942,7 +1061,6 @@
       }
     }
 
-    // Init
     fetchData();
     setInterval(fetchData, 60000);
   </script>
