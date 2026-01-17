@@ -96,6 +96,21 @@
       50% { opacity: 0.5; }
     }
 
+    .data-note {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .data-note .icon { font-size: 16px; }
+
     .dashboard {
       display: flex;
       flex-direction: column;
@@ -218,6 +233,15 @@
       gap: 6px;
     }
 
+    .metric-label .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: var(--blue);
+      color: white;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
     .info-btn {
       width: 16px;
       height: 16px;
@@ -243,7 +267,7 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 12px;
-      width: 260px;
+      width: 280px;
       font-size: 12px;
       color: var(--text-secondary);
       opacity: 0;
@@ -312,6 +336,12 @@
 
     .exchange-item .value.positive { color: var(--green); }
     .exchange-item .value.negative { color: var(--red); }
+
+    .exchange-item .hourly-note {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: 2px;
+    }
 
     .ls-container { margin-top: 12px; }
 
@@ -488,7 +518,7 @@
 
     .coingecko-exchanges {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
       gap: 10px;
     }
 
@@ -505,6 +535,10 @@
     .cg-exchange .name {
       color: var(--text-secondary);
       font-weight: 500;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .cg-exchange .fr {
@@ -514,6 +548,13 @@
 
     .cg-exchange .fr.positive { color: var(--green); }
     .cg-exchange .fr.negative { color: var(--red); }
+
+    .cg-note {
+      margin-top: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
 
     footer {
       text-align: center;
@@ -564,6 +605,11 @@
       </div>
     </header>
 
+    <div class="data-note">
+      <span class="icon">ℹ️</span>
+      <span><strong>Funding rates normalized to 8-hour periods</strong> for fair comparison. Hyperliquid pays hourly (rate shown is 8h equivalent). Data from Coinalyze (primary) + CoinGecko (extended coverage).</span>
+    </div>
+
     <main class="dashboard" id="dashboard">
       <!-- BTC Section -->
       <section class="coin-section" id="btc-section">
@@ -604,10 +650,11 @@
               <div class="metric-header">
                 <span class="metric-label">
                   Funding Rate
+                  <span class="badge">8h</span>
                   <span class="info-btn">?
                     <div class="tooltip">
-                      <h4>Funding Rate (8hr)</h4>
-                      Fee paid every 8h. Positive = longs pay shorts (bullish). Negative = shorts pay longs (bearish).
+                      <h4>Funding Rate (8-hour)</h4>
+                      Fee paid every 8h. Positive = longs pay shorts (bullish). Negative = shorts pay longs (bearish). All rates normalized to 8h for comparison.
                     </div>
                   </span>
                 </span>
@@ -648,7 +695,7 @@
                 <div class="chart-wrapper"><canvas id="btc-oi-chart"></canvas></div>
               </div>
               <div class="chart-card">
-                <h4>Funding Rate</h4>
+                <h4>Funding Rate (8h avg)</h4>
                 <div class="chart-wrapper"><canvas id="btc-fr-chart"></canvas></div>
               </div>
             </div>
@@ -657,8 +704,8 @@
           <!-- CoinGecko Section -->
           <div class="coingecko-section" id="btc-coingecko">
             <div class="coingecko-header">
-              <h3>🦎 CoinGecko Derivatives</h3>
-              <span class="badge">100+ Exchanges</span>
+              <h3>🦎 CoinGecko Extended Data</h3>
+              <span class="badge">More Exchanges</span>
             </div>
             <div class="coingecko-stats">
               <div class="coingecko-stat">
@@ -671,6 +718,7 @@
               </div>
             </div>
             <div class="coingecko-exchanges" id="btc-cg-exchanges"></div>
+            <div class="cg-note">Note: CoinGecko data may differ slightly from exchange APIs due to aggregation methods.</div>
           </div>
 
           <div class="trend-section">
@@ -721,10 +769,11 @@
               <div class="metric-header">
                 <span class="metric-label">
                   Funding Rate
+                  <span class="badge">8h</span>
                   <span class="info-btn">?
                     <div class="tooltip">
-                      <h4>Funding Rate (8hr)</h4>
-                      Fee paid every 8h between longs and shorts.
+                      <h4>Funding Rate (8-hour)</h4>
+                      Fee paid every 8h between longs and shorts. All rates normalized to 8h.
                     </div>
                   </span>
                 </span>
@@ -765,7 +814,7 @@
                 <div class="chart-wrapper"><canvas id="eth-oi-chart"></canvas></div>
               </div>
               <div class="chart-card">
-                <h4>Funding Rate</h4>
+                <h4>Funding Rate (8h avg)</h4>
                 <div class="chart-wrapper"><canvas id="eth-fr-chart"></canvas></div>
               </div>
             </div>
@@ -774,8 +823,8 @@
           <!-- CoinGecko Section -->
           <div class="coingecko-section" id="eth-coingecko">
             <div class="coingecko-header">
-              <h3>🦎 CoinGecko Derivatives</h3>
-              <span class="badge">100+ Exchanges</span>
+              <h3>🦎 CoinGecko Extended Data</h3>
+              <span class="badge">More Exchanges</span>
             </div>
             <div class="coingecko-stats">
               <div class="coingecko-stat">
@@ -788,6 +837,7 @@
               </div>
             </div>
             <div class="coingecko-exchanges" id="eth-cg-exchanges"></div>
+            <div class="cg-note">Note: CoinGecko data may differ slightly from exchange APIs due to aggregation methods.</div>
           </div>
 
           <div class="trend-section">
@@ -801,7 +851,7 @@
     </main>
 
     <footer>
-      Data from <a href="https://coinalyze.net" target="_blank">Coinalyze</a>, <a href="https://hyperliquid.xyz" target="_blank">Hyperliquid</a> & <a href="https://coingecko.com" target="_blank">CoinGecko</a> • Auto-refreshes every 60s
+      Data from <a href="https://coinalyze.net" target="_blank">Coinalyze</a>, <a href="https://hyperliquid.xyz" target="_blank">Hyperliquid</a> & <a href="https://coingecko.com" target="_blank">CoinGecko</a> • All funding rates normalized to 8h • Auto-refreshes every 60s
     </footer>
   </div>
 
@@ -955,7 +1005,7 @@
           const fr = e.fundingRate !== null ? formatPct(e.fundingRate) : 'N/A';
           const cls = e.fundingRate !== null ? (e.fundingRate >= 0 ? 'positive' : 'negative') : '';
           return `<div class="cg-exchange">
-            <span class="name">${e.exchange}</span>
+            <span class="name" title="${e.exchange}">${e.exchange}</span>
             <span class="fr ${cls}">${fr}</span>
           </div>`;
         }).join('');
