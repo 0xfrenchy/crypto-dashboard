@@ -12,449 +12,486 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Coinalyze API configuration
+// ============================================
+// API CONFIGURATIONS
+// ============================================
+
+// Coinalyze
 const COINALYZE_API = 'https://api.coinalyze.net/v1';
 const API_KEY = process.env.COINALYZE_API_KEY;
 
-// Cache for exchange codes and symbols
-let exchangeMap = {};
-let btcSymbols = [];
-let ethSymbols = [];
-let symbolsInitialized = false;
+// Hyperliquid (no API key needed)
+const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
 
-// Helper function to make API calls
-async function coinalyzeRequest(endpoint, params = {}) {
+// Exchanges from Coinalyze (4 exchanges)
+const COINALYZE_EXCHANGES = {
+  'A': 'Binance',
+  '6': 'Bybit',
+  '4': 'Huobi',
+  '3': 'OKX'
+};
+
+// ============================================
+// CACHING SYSTEM
+// ============================================
+const cache = {
+  // Coinalyze symbols
+  btcSymbols: [],
+  ethSymbols: [],
+  
+  // Combined data (Coinalyze + Hyperliquid)
+  data: {
+    btcOI: null,
+    ethOI: null,
+    btcFR: null,
+    ethFR: null,
+    btcOIHistory: null,
+    ethOIHistory: null,
+    btcFRHistory: null,
+    ethFRHistory: null,
+    btcLSHistory: null,
+    ethLSHistory: null
+  },
+  lastUpdate: null,
+  isRefreshing: false
+};
+
+const CACHE_TTL = 60 * 1000; // 60 seconds
+
+// ============================================
+// COINALYZE API HELPER
+// ============================================
+async function coinalyzeRequest(endpoint, params = {}, retries = 3) {
   const queryParams = new URLSearchParams({ ...params, api_key: API_KEY });
   const url = `${COINALYZE_API}${endpoint}?${queryParams}`;
   
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`API error: ${response.status} - ${text}`);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url);
+      
+      if (response.status === 429) {
+        const retryAfter = parseInt(response.headers.get('Retry-After') || '5');
+        console.log(`⏳ Rate limited on ${endpoint}, waiting ${retryAfter}s`);
+        await sleep(retryAfter * 1000);
+        continue;
+      }
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      if (attempt === retries) {
+        console.error(`❌ Coinalyze ${endpoint} failed:`, error.message);
+        throw error;
+      }
+      await sleep(2000 * attempt);
     }
-    return await response.json();
-  } catch (error) {
-    console.error(`Error fetching ${endpoint}:`, error.message);
-    throw error;
   }
 }
 
-// Initialize: fetch exchanges and available symbols
+// ============================================
+// HYPERLIQUID API HELPER
+// ============================================
+async function hyperliquidRequest(body, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(HYPERLIQUID_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Hyperliquid API error: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      if (attempt === retries) {
+        console.error(`❌ Hyperliquid request failed:`, error.message);
+        throw error;
+      }
+      await sleep(2000 * attempt);
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getExchangeName(symbol) {
+  const code = symbol.split('.')[1];
+  return COINALYZE_EXCHANGES[code] || code;
+}
+
+// ============================================
+// INITIALIZE COINALYZE SYMBOLS
+// ============================================
 async function initializeSymbols() {
   try {
-    console.log('🔍 Fetching available exchanges...');
-    const exchanges = await coinalyzeRequest('/exchanges');
-    
-    // Build exchange code -> name mapping
-    exchanges.forEach(ex => {
-      exchangeMap[ex.code] = ex.name;
-    });
-    console.log('📊 Available exchanges:', Object.values(exchangeMap).join(', '));
-
-    console.log('🔍 Fetching available futures markets...');
+    console.log('🔍 Fetching Coinalyze futures markets...');
     const markets = await coinalyzeRequest('/future-markets');
     
-    // Filter for BTC and ETH USDT perpetuals
-    const btcMarkets = markets.filter(m => 
-      m.base_asset === 'BTC' && 
-      m.is_perpetual && 
-      m.quote_asset === 'USDT'
-    );
+    const wantedCodes = Object.keys(COINALYZE_EXCHANGES);
     
-    const ethMarkets = markets.filter(m => 
-      m.base_asset === 'ETH' && 
-      m.is_perpetual && 
-      m.quote_asset === 'USDT'
-    );
+    cache.btcSymbols = markets
+      .filter(m => {
+        const code = m.symbol.split('.')[1];
+        return m.base_asset === 'BTC' && 
+               m.is_perpetual && 
+               (m.quote_asset === 'USDT' || m.quote_asset === 'USD') &&
+               wantedCodes.includes(code);
+      })
+      .map(m => m.symbol);
+    
+    cache.ethSymbols = markets
+      .filter(m => {
+        const code = m.symbol.split('.')[1];
+        return m.base_asset === 'ETH' && 
+               m.is_perpetual && 
+               (m.quote_asset === 'USDT' || m.quote_asset === 'USD') &&
+               wantedCodes.includes(code);
+      })
+      .map(m => m.symbol);
 
-    btcSymbols = btcMarkets.map(m => m.symbol);
-    ethSymbols = ethMarkets.map(m => m.symbol);
-
-    console.log(`✅ Found ${btcSymbols.length} BTC perpetual markets:`, btcSymbols.slice(0, 10).join(', '), btcSymbols.length > 10 ? '...' : '');
-    console.log(`✅ Found ${ethSymbols.length} ETH perpetual markets:`, ethSymbols.slice(0, 10).join(', '), ethSymbols.length > 10 ? '...' : '');
-
-    symbolsInitialized = true;
+    console.log('');
+    console.log('📊 Coinalyze Exchanges:', Object.values(COINALYZE_EXCHANGES).join(', '));
+    console.log(`   BTC symbols: ${cache.btcSymbols.join(', ')}`);
+    console.log(`   ETH symbols: ${cache.ethSymbols.join(', ')}`);
+    console.log('');
+    console.log('📊 Hyperliquid: Direct API (no key needed)');
+    console.log('');
+    
     return true;
   } catch (error) {
-    console.error('❌ Failed to initialize symbols:', error.message);
-    
-    // Fallback to known working symbols
-    console.log('⚠️ Using fallback symbols...');
-    exchangeMap = {
-      'A': 'Binance',
-      '6': 'Bybit', 
-      '5': 'OKX',
-      'B': 'Bitget',
-      '0': 'BitMEX',
-      '4': 'Deribit'
-    };
-    btcSymbols = ['BTCUSDT_PERP.A'];
-    ethSymbols = ['ETHUSDT_PERP.A'];
-    symbolsInitialized = true;
+    console.error('❌ Failed to initialize Coinalyze:', error.message);
+    // Fallback
+    cache.btcSymbols = ['BTCUSDT_PERP.A', 'BTCUSDT.6', 'BTCUSDT_PERP.4', 'BTCUSDT_PERP.3'];
+    cache.ethSymbols = ['ETHUSDT_PERP.A', 'ETHUSDT.6', 'ETHUSDT_PERP.4', 'ETHUSDT_PERP.3'];
     return false;
   }
 }
 
-// Get exchange name from symbol
-function getExchangeName(symbol) {
-  const code = symbol.split('.')[1];
-  return exchangeMap[code] || code;
+// ============================================
+// FETCH HYPERLIQUID DATA
+// ============================================
+async function fetchHyperliquidData() {
+  try {
+    console.log('  🌐 Fetching Hyperliquid data...');
+    
+    // Get current market data (includes OI and funding rate)
+    const metaData = await hyperliquidRequest({ type: 'metaAndAssetCtxs' });
+    
+    // metaData[0] = universe (list of assets)
+    // metaData[1] = asset contexts (current data for each asset)
+    const universe = metaData[0].universe;
+    const assetCtxs = metaData[1];
+    
+    // Find BTC and ETH indices
+    const btcIndex = universe.findIndex(a => a.name === 'BTC');
+    const ethIndex = universe.findIndex(a => a.name === 'ETH');
+    
+    let btcData = null;
+    let ethData = null;
+    
+    if (btcIndex !== -1 && assetCtxs[btcIndex]) {
+      const ctx = assetCtxs[btcIndex];
+      btcData = {
+        openInterest: parseFloat(ctx.openInterest) * parseFloat(ctx.markPx), // Convert to USD
+        fundingRate: parseFloat(ctx.funding),
+        markPrice: parseFloat(ctx.markPx)
+      };
+    }
+    
+    if (ethIndex !== -1 && assetCtxs[ethIndex]) {
+      const ctx = assetCtxs[ethIndex];
+      ethData = {
+        openInterest: parseFloat(ctx.openInterest) * parseFloat(ctx.markPx), // Convert to USD
+        fundingRate: parseFloat(ctx.funding),
+        markPrice: parseFloat(ctx.markPx)
+      };
+    }
+    
+    // Get funding history for charts (last 24 hours)
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    
+    const [btcFundingHistory, ethFundingHistory] = await Promise.all([
+      hyperliquidRequest({ type: 'fundingHistory', coin: 'BTC', startTime: oneDayAgo }),
+      hyperliquidRequest({ type: 'fundingHistory', coin: 'ETH', startTime: oneDayAgo })
+    ]);
+    
+    return {
+      btc: btcData,
+      eth: ethData,
+      btcFundingHistory: btcFundingHistory || [],
+      ethFundingHistory: ethFundingHistory || []
+    };
+  } catch (error) {
+    console.error('  ❌ Hyperliquid error:', error.message);
+    return { btc: null, eth: null, btcFundingHistory: [], ethFundingHistory: [] };
+  }
 }
 
-// Limit symbols to avoid rate limiting (max 20 per request)
-function limitSymbols(symbols, max = 8) {
-  // Prioritize major exchanges
-  const priority = ['A', '6', '5', 'B', '0', '4']; // Binance, Bybit, OKX, Bitget, BitMEX, Deribit
-  
-  const sorted = [...symbols].sort((a, b) => {
-    const codeA = a.split('.')[1];
-    const codeB = b.split('.')[1];
-    const indexA = priority.indexOf(codeA);
-    const indexB = priority.indexOf(codeB);
-    
-    if (indexA === -1 && indexB === -1) return 0;
-    if (indexA === -1) return 1;
-    if (indexB === -1) return -1;
-    return indexA - indexB;
-  });
-  
-  return sorted.slice(0, max);
-}
-
-// Get current open interest for a coin
-app.get('/api/open-interest/:coin', async (req, res) => {
-  try {
-    if (!symbolsInitialized) await initializeSymbols();
-    
-    const coin = req.params.coin.toUpperCase();
-    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
-    
-    if (!symbols) {
-      return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
-    }
-
-    const limitedSymbols = limitSymbols(symbols);
-    console.log(`Fetching OI for ${coin}:`, limitedSymbols.join(', '));
-
-    const data = await coinalyzeRequest('/open-interest', {
-      symbols: limitedSymbols.join(','),
-      convert_to_usd: 'true'
-    });
-
-    // Aggregate values from all exchanges
-    const totalOI = data.reduce((sum, item) => sum + (item.value || 0), 0);
-    const byExchange = data
-      .filter(item => item.value)
-      .map(item => ({
-        exchange: getExchangeName(item.symbol),
-        value: item.value,
-        symbol: item.symbol
-      }))
-      .sort((a, b) => b.value - a.value);
-
-    res.json({
-      coin,
-      total: totalOI,
-      byExchange,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('OI Error:', error);
-    res.status(500).json({ error: error.message });
+// ============================================
+// REFRESH ALL DATA
+// ============================================
+async function refreshAllData() {
+  if (cache.isRefreshing) {
+    console.log('⏳ Refresh already in progress...');
+    return;
   }
-});
-
-// Get current funding rate for a coin
-app.get('/api/funding-rate/:coin', async (req, res) => {
+  
+  cache.isRefreshing = true;
+  console.log('🔄 Refreshing all data...');
+  
   try {
-    if (!symbolsInitialized) await initializeSymbols();
+    const btcSymbolsStr = cache.btcSymbols.join(',');
+    const ethSymbolsStr = cache.ethSymbols.join(',');
     
-    const coin = req.params.coin.toUpperCase();
-    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
-    
-    if (!symbols) {
-      return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
-    }
-
-    const limitedSymbols = limitSymbols(symbols);
-    
-    const data = await coinalyzeRequest('/funding-rate', {
-      symbols: limitedSymbols.join(',')
-    });
-
-    // Calculate weighted average (simple average for now)
-    const validRates = data.filter(item => item.value !== null && item.value !== undefined);
-    const avgRate = validRates.length > 0 
-      ? validRates.reduce((sum, item) => sum + item.value, 0) / validRates.length 
-      : 0;
-
-    const byExchange = data
-      .filter(item => item.value !== null && item.value !== undefined)
-      .map(item => ({
-        exchange: getExchangeName(item.symbol),
-        value: item.value,
-        symbol: item.symbol
-      }))
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-
-    res.json({
-      coin,
-      average: avgRate,
-      byExchange,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('FR Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get open interest history (24h)
-app.get('/api/open-interest-history/:coin', async (req, res) => {
-  try {
-    if (!symbolsInitialized) await initializeSymbols();
-    
-    const coin = req.params.coin.toUpperCase();
-    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
-    
-    if (!symbols) {
-      return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
-    }
-
-    const limitedSymbols = limitSymbols(symbols, 5); // Fewer for history to save API calls
     const now = Math.floor(Date.now() / 1000);
     const oneDayAgo = now - (24 * 60 * 60);
 
-    const data = await coinalyzeRequest('/open-interest-history', {
-      symbols: limitedSymbols.join(','),
+    // Fetch Hyperliquid first (no rate limit concerns)
+    const hyperliquid = await fetchHyperliquidData();
+    await sleep(500);
+
+    // Fetch Coinalyze data with delays
+    console.log('  📈 Fetching Coinalyze BTC Open Interest...');
+    const coinalyzeBtcOI = await coinalyzeRequest('/open-interest', { 
+      symbols: btcSymbolsStr, 
+      convert_to_usd: 'true' 
+    });
+    await sleep(1500);
+
+    console.log('  📈 Fetching Coinalyze ETH Open Interest...');
+    const coinalyzeEthOI = await coinalyzeRequest('/open-interest', { 
+      symbols: ethSymbolsStr, 
+      convert_to_usd: 'true' 
+    });
+    await sleep(1500);
+
+    console.log('  💰 Fetching Coinalyze BTC Funding Rate...');
+    const coinalyzeBtcFR = await coinalyzeRequest('/funding-rate', { 
+      symbols: btcSymbolsStr 
+    });
+    await sleep(1500);
+
+    console.log('  💰 Fetching Coinalyze ETH Funding Rate...');
+    const coinalyzeEthFR = await coinalyzeRequest('/funding-rate', { 
+      symbols: ethSymbolsStr 
+    });
+    await sleep(1500);
+
+    console.log('  📊 Fetching Coinalyze BTC OI History...');
+    const coinalyzeBtcOIHistory = await coinalyzeRequest('/open-interest-history', {
+      symbols: btcSymbolsStr,
       interval: '1hour',
       from: oneDayAgo,
       to: now,
       convert_to_usd: 'true'
     });
+    await sleep(1500);
 
-    // Aggregate by timestamp
-    const aggregated = aggregateHistoryData(data);
-
-    res.json({
-      coin,
-      history: aggregated,
-      timestamp: Date.now()
+    console.log('  📊 Fetching Coinalyze ETH OI History...');
+    const coinalyzeEthOIHistory = await coinalyzeRequest('/open-interest-history', {
+      symbols: ethSymbolsStr,
+      interval: '1hour',
+      from: oneDayAgo,
+      to: now,
+      convert_to_usd: 'true'
     });
-  } catch (error) {
-    console.error('OI History Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+    await sleep(1500);
 
-// Get funding rate history (24h)
-app.get('/api/funding-rate-history/:coin', async (req, res) => {
-  try {
-    if (!symbolsInitialized) await initializeSymbols();
-    
-    const coin = req.params.coin.toUpperCase();
-    const symbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
-    
-    if (!symbols) {
-      return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
-    }
+    console.log('  📊 Fetching Coinalyze BTC FR History...');
+    const coinalyzeBtcFRHistory = await coinalyzeRequest('/funding-rate-history', {
+      symbols: btcSymbolsStr,
+      interval: '1hour',
+      from: oneDayAgo,
+      to: now
+    });
+    await sleep(1500);
 
-    const limitedSymbols = limitSymbols(symbols, 5);
-    const now = Math.floor(Date.now() / 1000);
-    const oneDayAgo = now - (24 * 60 * 60);
+    console.log('  📊 Fetching Coinalyze ETH FR History...');
+    const coinalyzeEthFRHistory = await coinalyzeRequest('/funding-rate-history', {
+      symbols: ethSymbolsStr,
+      interval: '1hour',
+      from: oneDayAgo,
+      to: now
+    });
+    await sleep(1500);
 
-    const data = await coinalyzeRequest('/funding-rate-history', {
-      symbols: limitedSymbols.join(','),
+    // Long/Short ratio
+    const btcLSSymbols = cache.btcSymbols.slice(0, 3).join(',');
+    const ethLSSymbols = cache.ethSymbols.slice(0, 3).join(',');
+
+    console.log('  ⚖️ Fetching Coinalyze BTC Long/Short...');
+    const coinalyzeBtcLS = await coinalyzeRequest('/long-short-ratio-history', {
+      symbols: btcLSSymbols,
+      interval: '1hour',
+      from: oneDayAgo,
+      to: now
+    });
+    await sleep(1500);
+
+    console.log('  ⚖️ Fetching Coinalyze ETH Long/Short...');
+    const coinalyzeEthLS = await coinalyzeRequest('/long-short-ratio-history', {
+      symbols: ethLSSymbols,
       interval: '1hour',
       from: oneDayAgo,
       to: now
     });
 
-    // Average by timestamp
-    const aggregated = averageHistoryData(data);
-
-    res.json({
-      coin,
-      history: aggregated,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('FR History Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get long/short ratio history (24h)
-app.get('/api/long-short-history/:coin', async (req, res) => {
-  try {
-    if (!symbolsInitialized) await initializeSymbols();
+    // ============================================
+    // MERGE COINALYZE + HYPERLIQUID DATA
+    // ============================================
     
-    const coin = req.params.coin.toUpperCase();
-    const allSymbols = coin === 'BTC' ? btcSymbols : coin === 'ETH' ? ethSymbols : null;
-    
-    if (!allSymbols) {
-      return res.status(400).json({ error: 'Invalid coin. Use BTC or ETH.' });
+    // Open Interest - add Hyperliquid to the array
+    cache.data.btcOI = [...coinalyzeBtcOI];
+    if (hyperliquid.btc) {
+      cache.data.btcOI.push({
+        symbol: 'BTC.HYPERLIQUID',
+        value: hyperliquid.btc.openInterest,
+        update: Date.now()
+      });
     }
+    
+    cache.data.ethOI = [...coinalyzeEthOI];
+    if (hyperliquid.eth) {
+      cache.data.ethOI.push({
+        symbol: 'ETH.HYPERLIQUID',
+        value: hyperliquid.eth.openInterest,
+        update: Date.now()
+      });
+    }
+    
+    // Funding Rate - add Hyperliquid
+    cache.data.btcFR = [...coinalyzeBtcFR];
+    if (hyperliquid.btc) {
+      cache.data.btcFR.push({
+        symbol: 'BTC.HYPERLIQUID',
+        value: hyperliquid.btc.fundingRate,
+        update: Date.now()
+      });
+    }
+    
+    cache.data.ethFR = [...coinalyzeEthFR];
+    if (hyperliquid.eth) {
+      cache.data.ethFR.push({
+        symbol: 'ETH.HYPERLIQUID',
+        value: hyperliquid.eth.fundingRate,
+        update: Date.now()
+      });
+    }
+    
+    // History data (Coinalyze only for now, Hyperliquid funding history is different format)
+    cache.data.btcOIHistory = coinalyzeBtcOIHistory;
+    cache.data.ethOIHistory = coinalyzeEthOIHistory;
+    cache.data.btcFRHistory = coinalyzeBtcFRHistory;
+    cache.data.ethFRHistory = coinalyzeEthFRHistory;
+    cache.data.btcLSHistory = coinalyzeBtcLS;
+    cache.data.ethLSHistory = coinalyzeEthLS;
 
-    // Long/short ratio - try major exchanges first
-    const limitedSymbols = limitSymbols(allSymbols, 4);
-    const now = Math.floor(Date.now() / 1000);
-    const oneDayAgo = now - (24 * 60 * 60);
-
-    const data = await coinalyzeRequest('/long-short-ratio-history', {
-      symbols: limitedSymbols.join(','),
-      interval: '1hour',
-      from: oneDayAgo,
-      to: now
-    });
-
-    // Average the ratios by timestamp
-    const aggregated = averageLongShortData(data);
-
-    res.json({
-      coin,
-      history: aggregated,
-      timestamp: Date.now()
-    });
+    cache.lastUpdate = Date.now();
+    console.log('✅ All data refreshed successfully!');
+    console.log('');
+    
   } catch (error) {
-    console.error('LS History Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error refreshing data:', error.message);
+  } finally {
+    cache.isRefreshing = false;
   }
-});
+}
 
-// Debug endpoint - show what symbols are being used
-app.get('/api/debug', async (req, res) => {
-  if (!symbolsInitialized) await initializeSymbols();
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+function getExchangeNameFromSymbol(symbol) {
+  if (symbol.includes('HYPERLIQUID')) {
+    return 'Hyperliquid';
+  }
+  const code = symbol.split('.')[1];
+  return COINALYZE_EXCHANGES[code] || code;
+}
+
+function aggregateOI(data) {
+  if (!data || !Array.isArray(data)) return { total: 0, byExchange: [] };
   
-  res.json({
-    exchanges: exchangeMap,
-    btcSymbols: btcSymbols,
-    ethSymbols: ethSymbols,
-    btcLimited: limitSymbols(btcSymbols),
-    ethLimited: limitSymbols(ethSymbols)
-  });
-});
+  const total = data.reduce((sum, item) => sum + (item.value || 0), 0);
+  const byExchange = data
+    .filter(item => item.value)
+    .map(item => ({
+      exchange: getExchangeNameFromSymbol(item.symbol),
+      value: item.value
+    }))
+    .sort((a, b) => b.value - a.value);
+  
+  return { total, byExchange };
+}
 
-// Get all current data for dashboard
-app.get('/api/dashboard', async (req, res) => {
-  try {
-    if (!symbolsInitialized) await initializeSymbols();
-    
-    const btcLimited = limitSymbols(btcSymbols);
-    const ethLimited = limitSymbols(ethSymbols);
+function aggregateFR(data) {
+  if (!data || !Array.isArray(data)) return { average: 0, byExchange: [] };
+  
+  const valid = data.filter(item => item.value != null);
+  const average = valid.length ? valid.reduce((sum, i) => sum + i.value, 0) / valid.length : 0;
+  const byExchange = valid.map(item => ({
+    exchange: getExchangeNameFromSymbol(item.symbol),
+    value: item.value
+  }));
+  
+  return { average, byExchange };
+}
 
-    // Fetch current data in parallel
-    const [btcOI, ethOI, btcFR, ethFR] = await Promise.all([
-      coinalyzeRequest('/open-interest', { symbols: btcLimited.join(','), convert_to_usd: 'true' }),
-      coinalyzeRequest('/open-interest', { symbols: ethLimited.join(','), convert_to_usd: 'true' }),
-      coinalyzeRequest('/funding-rate', { symbols: btcLimited.join(',') }),
-      coinalyzeRequest('/funding-rate', { symbols: ethLimited.join(',') })
-    ]);
-
-    // Aggregate
-    const btcTotalOI = btcOI.reduce((sum, item) => sum + (item.value || 0), 0);
-    const ethTotalOI = ethOI.reduce((sum, item) => sum + (item.value || 0), 0);
-    
-    const btcValidFR = btcFR.filter(i => i.value != null);
-    const ethValidFR = ethFR.filter(i => i.value != null);
-    
-    const btcAvgFR = btcValidFR.length ? btcValidFR.reduce((sum, i) => sum + i.value, 0) / btcValidFR.length : 0;
-    const ethAvgFR = ethValidFR.length ? ethValidFR.reduce((sum, i) => sum + i.value, 0) / ethValidFR.length : 0;
-
-    res.json({
-      btc: {
-        openInterest: { 
-          total: btcTotalOI, 
-          byExchange: btcOI
-            .filter(i => i.value)
-            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
-            .sort((a, b) => b.value - a.value)
-        },
-        fundingRate: { 
-          average: btcAvgFR, 
-          byExchange: btcFR
-            .filter(i => i.value != null)
-            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
-        }
-      },
-      eth: {
-        openInterest: { 
-          total: ethTotalOI, 
-          byExchange: ethOI
-            .filter(i => i.value)
-            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
-            .sort((a, b) => b.value - a.value)
-        },
-        fundingRate: { 
-          average: ethAvgFR, 
-          byExchange: ethFR
-            .filter(i => i.value != null)
-            .map(i => ({ exchange: getExchangeName(i.symbol), value: i.value }))
-        }
-      },
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('Dashboard Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Helper: Aggregate history data (sum values at each timestamp)
-function aggregateHistoryData(data) {
+function aggregateHistory(data) {
+  if (!data || !Array.isArray(data)) return [];
+  
   const byTime = {};
-  
   data.forEach(item => {
     if (item.history) {
       item.history.forEach(point => {
-        if (!byTime[point.t]) {
-          byTime[point.t] = 0;
-        }
-        byTime[point.t] += point.c || 0; // Use close value
+        if (!byTime[point.t]) byTime[point.t] = 0;
+        byTime[point.t] += point.c || 0;
       });
     }
   });
-
+  
   return Object.entries(byTime)
     .map(([t, value]) => ({ t: parseInt(t), value }))
     .sort((a, b) => a.t - b.t);
 }
 
-// Helper: Average history data (average values at each timestamp)
-function averageHistoryData(data) {
-  const byTime = {};
+function averageHistory(data) {
+  if (!data || !Array.isArray(data)) return [];
   
+  const byTime = {};
   data.forEach(item => {
     if (item.history) {
       item.history.forEach(point => {
-        if (!byTime[point.t]) {
-          byTime[point.t] = { sum: 0, count: 0 };
-        }
-        if (point.c !== null && point.c !== undefined) {
+        if (!byTime[point.t]) byTime[point.t] = { sum: 0, count: 0 };
+        if (point.c != null) {
           byTime[point.t].sum += point.c;
           byTime[point.t].count += 1;
         }
       });
     }
   });
-
+  
   return Object.entries(byTime)
     .map(([t, { sum, count }]) => ({ t: parseInt(t), value: count > 0 ? sum / count : 0 }))
     .sort((a, b) => a.t - b.t);
 }
 
-// Helper: Average long/short ratio data
-function averageLongShortData(data) {
-  const byTime = {};
+function averageLSHistory(data) {
+  if (!data || !Array.isArray(data)) return [];
   
+  const byTime = {};
   data.forEach(item => {
     if (item.history) {
       item.history.forEach(point => {
-        if (!byTime[point.t]) {
-          byTime[point.t] = { ratioSum: 0, longSum: 0, shortSum: 0, count: 0 };
-        }
-        if (point.r !== null && point.r !== undefined) {
+        if (!byTime[point.t]) byTime[point.t] = { ratioSum: 0, longSum: 0, shortSum: 0, count: 0 };
+        if (point.r != null) {
           byTime[point.t].ratioSum += point.r;
           byTime[point.t].longSum += point.l || 0;
           byTime[point.t].shortSum += point.s || 0;
@@ -463,7 +500,7 @@ function averageLongShortData(data) {
       });
     }
   });
-
+  
   return Object.entries(byTime)
     .map(([t, { ratioSum, longSum, shortSum, count }]) => ({
       t: parseInt(t),
@@ -474,16 +511,114 @@ function averageLongShortData(data) {
     .sort((a, b) => a.t - b.t);
 }
 
+// ============================================
+// API ENDPOINTS
+// ============================================
+
+app.get('/api/open-interest/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase();
+  const data = coin === 'BTC' ? cache.data.btcOI : cache.data.ethOI;
+  
+  if (!data) {
+    return res.status(503).json({ error: 'Data not yet loaded. Please wait...' });
+  }
+  
+  const result = aggregateOI(data);
+  res.json({ coin, ...result, timestamp: cache.lastUpdate });
+});
+
+app.get('/api/funding-rate/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase();
+  const data = coin === 'BTC' ? cache.data.btcFR : cache.data.ethFR;
+  
+  if (!data) {
+    return res.status(503).json({ error: 'Data not yet loaded. Please wait...' });
+  }
+  
+  const result = aggregateFR(data);
+  res.json({ coin, ...result, timestamp: cache.lastUpdate });
+});
+
+app.get('/api/open-interest-history/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase();
+  const data = coin === 'BTC' ? cache.data.btcOIHistory : cache.data.ethOIHistory;
+  
+  if (!data) {
+    return res.status(503).json({ error: 'Data not yet loaded. Please wait...' });
+  }
+  
+  res.json({ coin, history: aggregateHistory(data), timestamp: cache.lastUpdate });
+});
+
+app.get('/api/funding-rate-history/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase();
+  const data = coin === 'BTC' ? cache.data.btcFRHistory : cache.data.ethFRHistory;
+  
+  if (!data) {
+    return res.status(503).json({ error: 'Data not yet loaded. Please wait...' });
+  }
+  
+  res.json({ coin, history: averageHistory(data), timestamp: cache.lastUpdate });
+});
+
+app.get('/api/long-short-history/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase();
+  const data = coin === 'BTC' ? cache.data.btcLSHistory : cache.data.ethLSHistory;
+  
+  if (!data) {
+    return res.status(503).json({ error: 'Data not yet loaded. Please wait...' });
+  }
+  
+  res.json({ coin, history: averageLSHistory(data), timestamp: cache.lastUpdate });
+});
+
+app.get('/api/debug', (req, res) => {
+  res.json({
+    coinalyzeExchanges: COINALYZE_EXCHANGES,
+    hyperliquid: 'Direct API',
+    btcSymbols: cache.btcSymbols,
+    ethSymbols: cache.ethSymbols,
+    lastUpdate: cache.lastUpdate ? new Date(cache.lastUpdate).toISOString() : null,
+    isRefreshing: cache.isRefreshing,
+    dataSample: {
+      btcOICount: cache.data.btcOI?.length || 0,
+      ethOICount: cache.data.ethOI?.length || 0,
+      btcFRCount: cache.data.btcFR?.length || 0,
+      ethFRCount: cache.data.ethFR?.length || 0
+    }
+  });
+});
+
 // Serve the frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start server
+// ============================================
+// START SERVER
+// ============================================
 app.listen(PORT, async () => {
-  console.log(`🚀 Crypto Dashboard server running on port ${PORT}`);
-  console.log(`📊 Open http://localhost:${PORT} in your browser`);
+  console.log('');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('   🚀 Crypto Derivatives Dashboard');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(`   Server: http://localhost:${PORT}`);
+  console.log('');
+  console.log('   Data Sources:');
+  console.log('   • Coinalyze: Binance, Bybit, Huobi, OKX');
+  console.log('   • Hyperliquid: Direct API');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('');
+  console.log('⏳ Loading initial data (takes ~20s to respect rate limits)...');
+  console.log('');
   
-  // Initialize symbols on startup
   await initializeSymbols();
+  await sleep(2000);
+  await refreshAllData();
+  
+  // Refresh every 60 seconds
+  setInterval(async () => {
+    console.log('🔄 Scheduled refresh starting...');
+    await refreshAllData();
+  }, CACHE_TTL);
 });
